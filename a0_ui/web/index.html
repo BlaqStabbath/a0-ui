@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Agent Zero</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<style>
+  html,body{margin:0;height:100%;background:#0b1020;color:#eaeefb;font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #toolbar{display:flex;gap:6px;padding:8px;background:#141a2e;border-bottom:1px solid #2a3150;align-items:center}
+  #toolbar button{background:#2a3150;color:#eaeefb;border:1px solid #3a4370;padding:6px 12px;border-radius:4px;cursor:pointer;font:inherit}
+  #toolbar button:hover{background:#3a4370}
+  #toolbar button:disabled{opacity:.5;cursor:not-allowed}
+  #status{margin-left:auto;font-size:12px;color:#8a93b8}
+  #tabs{display:flex;background:#0f1525;border-bottom:1px solid #2a3150}
+  .tab{padding:8px 16px;cursor:pointer;border-right:1px solid #2a3150;color:#8a93b8}
+  .tab.active{background:#0b1020;color:#eaeefb;border-bottom:2px solid #5b8cff}
+  #content{position:absolute;top:80px;left:0;right:0;bottom:0}
+  .pane{position:absolute;inset:0;display:none}
+  .pane.active{display:block}
+  #webui-pane iframe{width:100%;height:100%;border:0;background:#fff}
+  #logs-pane{padding:12px;overflow:auto}
+  #logs-pane pre{margin:0;white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#cfd6f0}
+  #cli-pane{background:#000;padding:4px}
+  #cli-pane .xterm{height:100%}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="btn-refresh">Refresh</button>
+  <button id="btn-restart">Restart A0</button>
+  <button id="btn-logs">View Logs</button>
+  <button id="btn-cli">A0 CLI</button>
+  <span id="status">loading...</span>
+</div>
+<div id="tabs">
+  <div class="tab" data-pane="webui-pane">Web UI</div>
+  <div class="tab" data-pane="logs-pane">Logs</div>
+  <div class="tab" data-pane="cli-pane">A0 CLI</div>
+</div>
+<div id="content">
+  <div id="webui-pane" class="pane"><iframe id="webui" src="about:blank"></iframe></div>
+  <div id="logs-pane" class="pane"><pre id="logs">loading...</pre></div>
+  <div id="cli-pane" class="pane"><div id="term"></div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script>
+let status = {}, term = null, fit = null, ws = null;
+
+async function init(){
+  status = await window.pywebview.api.get_status();
+  document.getElementById('status').textContent = 'Container: ' + status.container + ' | WebUI: ' + status.webui_url + ' | CLI: ' + status.cli_cmd;
+  document.getElementById('webui').src = status.webui_url;
+  bindTabs(); bindButtons();
+  setActiveTab('webui-pane');
+}
+
+function bindTabs(){
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setActiveTab(t.dataset.pane)));
+}
+
+function setActiveTab(pane){
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.pane === pane));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === pane));
+  if (pane === 'cli-pane' && !term) startTerm();
+  if (pane === 'logs-pane') loadLogs();
+}
+
+function bindButtons(){
+  document.getElementById('btn-refresh').onclick = () => {
+    const a = document.querySelector('.pane.active').id;
+    if (a === 'webui-pane'){ const f = document.getElementById('webui'); f.src = f.src; }
+    else if (a === 'logs-pane') loadLogs();
+    else if (a === 'cli-pane'){ if (ws && ws.readyState === 1) ws.send('\x0c'); }
+  };
+  document.getElementById('btn-restart').onclick = restartA0;
+  document.getElementById('btn-logs').onclick = () => setActiveTab('logs-pane');
+  document.getElementById('btn-cli').onclick = () => setActiveTab('cli-pane');
+}
+
+async function loadLogs(){
+  const el = document.getElementById('logs');
+  el.textContent = 'loading...';
+  try { el.textContent = await window.pywebview.api.get_logs(); }
+  catch (e) { el.textContent = 'Error: ' + e; }
+}
+
+async function restartA0(){
+  const btn = document.getElementById('btn-restart');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = 'Restarting...';
+  try {
+    const r = await window.pywebview.api.restart_a0();
+    if (!r.ok){ alert('Restart failed: ' + (r.error || 'unknown')); return; }
+    setStatus('Waiting for container...');
+    for (let i = 0; i < 60; i++){
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const r2 = await fetch(status.webui_url, { method: 'GET', cache: 'no-store' });
+        if (r2.ok || r2.status < 500){
+          setStatus('Container is up. Reloading Web UI.');
+          document.getElementById('webui').src = status.webui_url;
+          setActiveTab('webui-pane');
+          return;
+        }
+      } catch (e) {}
+      setStatus('Still waiting... (' + (i + 1) + '/60)');
+    }
+    setStatus('Container did not come back in time. Check Logs tab.');
+  } finally { btn.disabled = false; btn.textContent = old; }
+}
+
+function setStatus(s){ document.getElementById('status').textContent = s; }
+
+function startTerm(){
+  term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: '#000' } });
+  fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('term'));
+  fit.fit();
+  ws = new WebSocket('ws://127.0.0.1:' + status.ws_port + '/');
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => term.focus();
+  ws.onmessage = ev => {
+    if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data));
+    else term.write(ev.data);
+  };
+  ws.onclose = () => term.write('\r\n\x1b[31m[connection closed]\x1b[0m\r\n');
+  term.onData(d => { if (ws.readyState === 1) ws.send(d); });
+  window.addEventListener('resize', () => fit.fit());
+}
+
+window.addEventListener('pywebviewready', init);
+</script>
+</body>
+</html>
