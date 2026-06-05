@@ -16,8 +16,7 @@ def get_status():
 def get_logs() -> str:
     out = ""
     if not shutil.which("docker"):
-        return "docker not found on PATH
-"
+        return "docker not found on PATH"
     try:
         r = subprocess.run(["docker", "logs", "--tail", "150", CONTAINER_NAME], capture_output=True, text=True, timeout=5)
         out += "=== docker logs (last 150) ===\n" + (r.stdout or "") + (r.stderr or "")
