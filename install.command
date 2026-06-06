@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# a0-ui macOS installer
+# a0-ui macOS installer / updater
 # Double-clickable. Creates .venv, installs deps, builds Agent Zero.app bundle.
+# Re-running upgrades pip packages and rebuilds the .app.
 
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
-echo "=== a0-ui macOS installer ==="
+# 1. Detect first install vs update
+if [ -x "$HERE/.venv/bin/python" ]; then
+    MODE="update"
+else
+    MODE="first-install"
+fi
+
+echo "=== a0-ui $MODE ==="
 echo "Project directory: $HERE"
 echo
 
@@ -25,9 +33,11 @@ fi
 PY=python3
 echo "Using Python: $($PY --version 2>&1)"
 
-if [ ! -x ".venv/bin/python" ]; then
-    echo "Creating virtual environment..."
-    $PY -m venv .venv
+if [ "$MODE" = "first-install" ]; then
+    if [ ! -x ".venv/bin/python" ]; then
+        echo "Creating virtual environment..."
+        $PY -m venv .venv
+    fi
 fi
 
 echo "Installing dependencies..."
@@ -35,6 +45,19 @@ echo "Installing dependencies..."
 .venv/bin/python -m pip install -r requirements.txt
 
 APP_DIR="$HERE/Agent Zero.app"
+LAUNCHER_SCRIPT="$APP_DIR/Contents/MacOS/AgentZeroLauncher"
+
+# 2. Validate the previously-registered .app (if any)
+if [ -f "$LAUNCHER_SCRIPT" ]; then
+    old_here=$(grep '^cd ' "$LAUNCHER_SCRIPT" | head -1 | sed -E 's/^cd "(.+)"$/\1/')
+    if [ -n "$old_here" ] && [ ! -d "$old_here" ]; then
+        echo
+        echo "WARNING: previous install pointed at $old_here which no longer exists."
+        echo "         this install registers: $HERE"
+    fi
+fi
+
+# 3. Rebuild the .app bundle
 echo "Creating $APP_DIR..."
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
