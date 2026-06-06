@@ -95,6 +95,12 @@ async function bootUi({ withTransport = true } = {}) {
   return { dom, sockets, termWrites, terminalOptions, terminalInstances };
 }
 
+async function openTerminal(dom) {
+  dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -103,7 +109,7 @@ describe("index.html terminal WebSocket lifecycle", () => {
   it("opens the terminal WebSocket with the pywebview status port", async () => {
     const { dom, sockets } = await bootUi();
 
-    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    await openTerminal(dom);
 
     expect(sockets).toHaveLength(1);
     expect(sockets[0].url).toBe("ws://127.0.0.1:12345/");
@@ -119,9 +125,13 @@ describe("index.html terminal WebSocket lifecycle", () => {
   it("uses normal terminal font size and full-size terminal container", async () => {
     const { dom, terminalOptions } = await bootUi();
 
-    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    await openTerminal(dom);
 
     expect(terminalOptions[0].fontSize).toBe(14);
+    expect(dom.window.getComputedStyle(dom.window.document.getElementById("content")).width).toBe("100vw");
+    expect(dom.window.getComputedStyle(dom.window.document.getElementById("content")).height).toBe("calc(100vh - var(--panel-h))");
+    expect(dom.window.getComputedStyle(dom.window.document.getElementById("cli-pane")).height).toBe("100%");
+    expect(dom.window.getComputedStyle(dom.window.document.getElementById("cli-pane")).width).toBe("100%");
     expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).height).toBe("100%");
     expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).width).toBe("100%");
   });
@@ -131,7 +141,7 @@ describe("index.html terminal WebSocket lifecycle", () => {
     const termEl = dom.window.document.getElementById("term");
     termEl.getBoundingClientRect = () => ({ width: 1000, height: 600 });
 
-    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    await openTerminal(dom);
 
     const terminal = terminalInstances[0];
     expect(terminal.resizes.at(-1)).toEqual({ cols: 100, rows: 30 });
@@ -140,7 +150,7 @@ describe("index.html terminal WebSocket lifecycle", () => {
   it("sends terminal size to the PTY when the WebSocket opens", async () => {
     const { dom, sockets } = await bootUi();
 
-    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    await openTerminal(dom);
     sockets[0].readyState = 1;
     sockets[0].onopen();
 
@@ -151,7 +161,7 @@ describe("index.html terminal WebSocket lifecycle", () => {
     vi.useFakeTimers();
     const { dom, sockets, termWrites } = await bootUi();
 
-    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    await openTerminal(dom);
     sockets[0].onclose();
     expect(termWrites.filter((w) => String(w).includes("connection lost"))).toHaveLength(1);
 
@@ -165,7 +175,7 @@ describe("index.html terminal WebSocket lifecycle", () => {
     vi.useFakeTimers();
     const { dom, sockets, termWrites } = await bootUi();
 
-    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    await openTerminal(dom);
     for (let i = 0; i < 5; i++) {
       sockets.at(-1).onclose();
       await vi.runOnlyPendingTimersAsync();

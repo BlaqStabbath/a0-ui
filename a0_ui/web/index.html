@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Agent Zero</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
 <style>
   :root{
     --bg:#0F0B1E;
@@ -30,17 +29,18 @@
   #status{max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}
   #btn-reconnect{display:none;border-color:var(--secondary)}
   #btn-reconnect.visible{display:inline-block}
-  #content{position:absolute;top:var(--panel-h);left:0;right:0;bottom:0}
-  .pane{position:absolute;inset:0;display:none}
+  #content{position:absolute;top:var(--panel-h);left:0;right:0;bottom:0;width:100vw;height:calc(100vh - var(--panel-h));overflow:hidden}
+  .pane{position:absolute;inset:0;width:100%;height:100%;display:none;box-sizing:border-box;overflow:hidden}
   .pane.active{display:block}
   #webui-pane iframe{width:100%;height:100%;border:0;background:#fff}
   #logs-pane{padding:12px;overflow:auto}
   #logs-pane pre{margin:0;white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#cfd6f0}
   #cli-pane{background:var(--bg);padding:0;border:0}
-  #term{height:100%;width:100%}
-  #cli-pane .xterm{height:100%!important;width:100%!important;border:0}
+  #term{height:100%;width:100%;max-width:none;max-height:none;overflow:hidden}
+  #cli-pane .xterm{height:100%!important;width:100%!important;max-width:none!important;max-height:none!important;border:0;box-sizing:border-box}
   #cli-pane .xterm-viewport{height:100%!important;width:100%!important;background:var(--bg)}
   #cli-pane .xterm-screen{height:100%!important;width:100%!important;border:0}
+  #cli-pane .xterm-rows{width:100%!important}
   #status-dot{width:10px;height:10px;border-radius:50%;background:var(--secondary);display:inline-block;vertical-align:middle;transition:background-color 0.2s;box-shadow:0 0 14px rgba(59,130,246,.45)}
   #status-dot.ws{background:#4ade80}
   #status-dot.disconnected{background:#ef4444}
@@ -69,21 +69,26 @@
   <div id="logs-pane" class="pane"><pre id="logs">loading...</pre></div>
   <div id="cli-pane" class="pane"><div id="term"></div></div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="./js/transport.js"></script>
 <script>
 const createTransport = window.a0Transport && window.a0Transport.createTransport;
 const POLLING_INTERVAL_MS = 200;
 const REQUIRE_WEBSOCKET = true;
+const XTERM_CSS_URL = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css';
+const XTERM_JS_URL = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
+const XTERM_FIT_JS_URL = 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js';
 
 let status = {}, term = null, fit = null, ws = null;
 let transport = null;
 let pollState = { lastSeq: 0, timer: null, active: false };
 let closingWsForReconnect = false;
 let terminalResizeObserver = null;
+let initialized = false;
+let terminalAssetsPromise = null;
 
 async function init(){
+  if (initialized) return;
+  initialized = true;
   status = await window.pywebview.api.get_status();
   document.getElementById('status').textContent = 'Container: ' + status.container + ' | WebUI: ' + status.webui_url + ' | Shell: ' + status.entry_cmd;
   document.getElementById('webui').src = status.webui_url;
@@ -108,6 +113,39 @@ function bindButtons(){
   document.getElementById('btn-restart').onclick = restartA0;
   document.getElementById('btn-open-browser').onclick = openWebUi;
   document.getElementById('btn-reconnect').onclick = manualReconnect;
+}
+
+function loadStylesheet(url){
+  if (document.querySelector('link[href="' + url + '"]')) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.onload = resolve;
+    link.onerror = () => reject(new Error('failed to load ' + url));
+    document.head.appendChild(link);
+  });
+}
+
+function loadScript(url){
+  if (document.querySelector('script[src="' + url + '"]')) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('failed to load ' + url));
+    document.body.appendChild(script);
+  });
+}
+
+function loadTerminalAssets(){
+  if (window.Terminal && window.FitAddon) return Promise.resolve();
+  if (!terminalAssetsPromise) {
+    terminalAssetsPromise = loadStylesheet(XTERM_CSS_URL)
+      .then(() => loadScript(XTERM_JS_URL))
+      .then(() => loadScript(XTERM_FIT_JS_URL));
+  }
+  return terminalAssetsPromise;
 }
 
 function refreshActivePane(){
@@ -270,7 +308,14 @@ function manualReconnect() {
   startTerm();
 }
 
-function startTerm(){
+async function startTerm(){
+  try {
+    await loadTerminalAssets();
+  } catch (e) {
+    setStatus('Terminal assets failed to load: ' + e.message);
+    return;
+  }
+
   if (!createTransport) {
     if (term) term.write('\r\n\x1b[31m[terminal transport script failed to load]\x1b[0m\r\n');
     return;
@@ -296,8 +341,10 @@ function startTerm(){
     term.loadAddon(fit);
     term.open(document.getElementById('term'));
     window.addEventListener('resize', fitTerminal);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', fitTerminal);
     if (window.ResizeObserver) {
       terminalResizeObserver = new ResizeObserver(fitTerminal);
+      terminalResizeObserver.observe(document.getElementById('content'));
       terminalResizeObserver.observe(document.getElementById('cli-pane'));
       terminalResizeObserver.observe(document.getElementById('term'));
     }
@@ -347,6 +394,9 @@ function startTerm(){
 }
 
 window.addEventListener('pywebviewready', init);
+if (window.pywebview && window.pywebview.api) {
+  init();
+}
 </script>
 </body>
 </html>

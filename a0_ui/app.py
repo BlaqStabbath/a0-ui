@@ -22,6 +22,7 @@ WINDOW_W, WINDOW_H = 1200, 800
 
 _ws_port = [0]
 _http_port = [0]
+_wrapper_port = [0]
 
 
 def get_status() -> dict:
@@ -32,6 +33,7 @@ def get_status() -> dict:
         "entry_cmd": config.entry_cmd,
         "ws_port": _ws_port[0],
         "http_port": _http_port[0],
+        "wrapper_port": _wrapper_port[0],
         "platform": config.platform,
     }
 
@@ -87,6 +89,11 @@ def restart_a0() -> dict:
 def open_webui() -> dict:
     url = load_config().webui_url
     return {"ok": webbrowser.open(url)}
+
+
+def _webview_storage_path() -> str:
+    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(data_home, "a0-ui", "webview")
 
 
 def _free_port() -> int:
@@ -157,9 +164,11 @@ def main() -> None:
     _start_servers()
     api = Api()
     html_path = os.path.join(os.path.dirname(__file__), "web", "index.html")
+    wrapper_port = _free_port()
+    _wrapper_port[0] = wrapper_port
     window = webview.create_window(
         "Agent Zero",
-        url="file://" + html_path,
+        url=html_path,
         width=WINDOW_W,
         height=WINDOW_H,
         js_api=api,
@@ -171,7 +180,14 @@ def main() -> None:
 
         dump(window)
 
-    webview.start()
+    storage_path = _webview_storage_path()
+    os.makedirs(storage_path, exist_ok=True)
+    webview.start(
+        private_mode=False,
+        storage_path=storage_path,
+        http_server=True,
+        http_port=wrapper_port,
+    )
 
 
 if __name__ == "__main__":

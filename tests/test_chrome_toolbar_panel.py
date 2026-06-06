@@ -39,9 +39,12 @@ def test_slice_004_palette_and_active_tab_treatment_are_present():
 
 
 def test_terminal_pane_has_zero_padding_and_no_border():
+    assert "#content{position:absolute;top:var(--panel-h);left:0;right:0;bottom:0;width:100vw;height:calc(100vh - var(--panel-h));overflow:hidden}" in HTML
+    assert ".pane{position:absolute;inset:0;width:100%;height:100%;display:none;box-sizing:border-box;overflow:hidden}" in HTML
     assert "#cli-pane{background:var(--bg);padding:0;border:0}" in HTML
-    assert "#term{height:100%;width:100%}" in HTML
-    assert "#cli-pane .xterm{height:100%!important;width:100%!important;border:0}" in HTML
+    assert "#term{height:100%;width:100%;max-width:none;max-height:none;overflow:hidden}" in HTML
+    assert "#cli-pane .xterm{height:100%!important;width:100%!important;max-width:none!important;max-height:none!important;border:0;box-sizing:border-box}" in HTML
     assert "#cli-pane .xterm-viewport{height:100%!important;width:100%!important;background:var(--bg)}" in HTML
     assert "#cli-pane .xterm-screen{height:100%!important;width:100%!important;border:0}" in HTML
+    assert "#cli-pane .xterm-rows{width:100%!important}" in HTML
     assert "fontSize: 14" in HTML

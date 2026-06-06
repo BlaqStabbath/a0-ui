@@ -56,14 +56,80 @@ async function startTerminalWsServer() {
   return { server, port: server.address().port, messages };
 }
 
+async function startMockA0WebUiServer(wsPort) {
+  const requests = { socketIoUpgrades: 0, pollRequests: 0 };
+  const server = http.createServer((req, res) => {
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    if (req.url === "/wrapper") {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(makeHarnessWithWebUiUrl(wsPort, origin));
+      return;
+    }
+    if (req.url.startsWith("/api/poll")) {
+      requests.pollRequests += 1;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(`<!doctype html>
+      <html>
+      <head>
+        <style>
+          .status-icon {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: orange;
+          }
+        </style>
+      </head>
+      <body>
+        <div
+          class="status-icon"
+          title="Degraded (polling fallback)"
+          aria-label="Degraded (polling fallback)"
+          alt="Degraded (polling fallback)"
+        ></div>
+        <script>
+          window.__a0Diagnostics = { mode: "DEGRADED", transport: "polling" };
+          try {
+            new WebSocket("ws://" + location.host + "/socket.io/?EIO=4&transport=websocket");
+          } catch (error) {
+            window.__a0Diagnostics.wsError = String(error);
+          }
+          fetch("/api/poll").catch(() => {});
+        </script>
+      </body>
+      </html>`);
+  });
+  server.on("upgrade", (req, socket) => {
+    if (req.url.startsWith("/socket.io/")) {
+      requests.socketIoUpgrades += 1;
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    socket.destroy();
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  return { server, port: server.address().port, requests };
+}
+
 function makeHarness(wsPort) {
+  return makeHarnessWithWebUiUrl(wsPort, "http://127.0.0.1:5080");
+}
+
+function makeHarnessWithWebUiUrl(wsPort, webuiUrl) {
   const html = fs.readFileSync(INDEX_HTML, "utf8");
   const transport = fs.readFileSync(TRANSPORT_JS, "utf8");
+  const terminalStubs = `<script>window.__termWrites=[]; window.Terminal=class{constructor(){this.cols=101;this.rows=33} loadAddon(){} open(){} focus(){} write(data){window.__termWrites.push(String(data))} onData(cb){this._onData=cb}}</script><script>window.FitAddon={FitAddon:class{fit(){}}}</script>`;
   return html
-    .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/xterm@[\s\S]*?<\/script>/, "<script>window.__termWrites=[]; window.Terminal=class{constructor(){this.cols=101;this.rows=33} loadAddon(){} open(){} focus(){} write(data){window.__termWrites.push(String(data))} onData(cb){this._onData=cb}}</script>")
-    .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/xterm-addon-fit@[\s\S]*?<\/script>/, "<script>window.FitAddon={FitAddon:class{fit(){}}}</script>")
-    .replace('<script src="./js/transport.js"></script>', `<script>${transport}</script>`)
-    .replace("<script>\nconst createTransport", `<script>\nwindow.pywebview={api:{get_status:async()=>({container:"agent-zero",webui_url:"http://127.0.0.1:5080",entry_cmd:"a0",ws_port:${wsPort},http_port:9}),get_logs:async()=>"",open_webui:async()=>({ok:true}),restart_a0:async()=>({ok:true})}};\nconst createTransport`);
+    .replace('<script src="./js/transport.js"></script>', `${terminalStubs}<script>${transport}</script>`)
+    .replace("<script>\nconst createTransport", `<script>\nwindow.pywebview={api:{get_status:async()=>({container:"agent-zero",webui_url:${JSON.stringify(webuiUrl)},entry_cmd:"a0",ws_port:${wsPort},http_port:9}),get_logs:async()=>"",open_webui:async()=>({ok:true}),restart_a0:async()=>({ok:true})}};\nconst createTransport`);
 }
 
 async function launchChromium() {
@@ -139,6 +205,26 @@ async function waitFor(fn, timeoutMs = 5000) {
   throw new Error("Timed out waiting for condition");
 }
 
+async function openPageAtUrl(browserCdp, endpoint, url) {
+  const target = await browserCdp.send("Target.createTarget", { url: "about:blank" });
+  const { webSocketDebuggerUrl } = await fetch(`http://127.0.0.1:${new URL(endpoint).port}/json/list`)
+    .then((r) => r.json())
+    .then((targets) => targets.find((t) => t.id === target.result.targetId));
+  const page = new CdpClient(webSocketDebuggerUrl);
+  await page.connect();
+  await page.send("Runtime.enable");
+  await page.send("Log.enable");
+  await page.send("Network.enable");
+  await page.send("Page.enable");
+  await page.send("Page.navigate", { url });
+  await waitFor(() => page.send("Runtime.evaluate", { expression: "document.readyState === 'complete'", returnByValue: true }).then((r) => r.result.result.value));
+  return page;
+}
+
+function openHarnessPage(browserCdp, endpoint, harnessPath) {
+  return openPageAtUrl(browserCdp, endpoint, `file://${harnessPath}`);
+}
+
 describe("Chromium terminal WebSocket E2E", () => {
   it("connects by WebSocket without polling fallback and captures browser diagnostics", async () => {
     const wsServer = await startTerminalWsServer();
@@ -149,17 +235,7 @@ describe("Chromium terminal WebSocket E2E", () => {
     await browserCdp.connect();
 
     try {
-      const target = await browserCdp.send("Target.createTarget", { url: `file://${harnessPath}` });
-      const { webSocketDebuggerUrl } = await fetch(`http://127.0.0.1:${new URL(browser.endpoint).port}/json/list`)
-        .then((r) => r.json())
-        .then((targets) => targets.find((t) => t.id === target.result.targetId));
-      const page = new CdpClient(webSocketDebuggerUrl);
-      await page.connect();
-      await page.send("Runtime.enable");
-      await page.send("Log.enable");
-      await page.send("Network.enable");
-      await page.send("Page.enable");
-      await waitFor(() => page.send("Runtime.evaluate", { expression: "document.readyState === 'complete'", returnByValue: true }).then((r) => r.result.result.value));
+      const page = await openHarnessPage(browserCdp, browser.endpoint, harnessPath);
       await page.send("Runtime.evaluate", {
         expression: "window.dispatchEvent(new Event('pywebviewready'))",
         returnByValue: true,
@@ -197,6 +273,63 @@ describe("Chromium terminal WebSocket E2E", () => {
       wsServer.server.close();
       fs.rmSync(browser.userDataDir, { recursive: true, force: true });
       fs.rmSync(harnessPath, { force: true });
+    }
+  }, 20000);
+
+  it("inspects embedded Agent Zero status icon and detects degraded polling fallback", async () => {
+    const wsServer = await startTerminalWsServer();
+    const a0Server = await startMockA0WebUiServer(wsServer.port);
+    const webuiUrl = `http://127.0.0.1:${a0Server.port}`;
+    const browser = await launchChromium();
+    const browserCdp = new CdpClient(browser.endpoint);
+    await browserCdp.connect();
+
+    try {
+      const page = await openPageAtUrl(browserCdp, browser.endpoint, `${webuiUrl}/wrapper`);
+      await page.send("Runtime.evaluate", {
+        expression: "window.dispatchEvent(new Event('pywebviewready'))",
+        returnByValue: true,
+      });
+      await waitFor(() => page.send("Runtime.evaluate", {
+        expression: `document.getElementById('webui').src === ${JSON.stringify(`${webuiUrl}/`)}`,
+        returnByValue: true,
+      }).then((r) => r.result.result.value));
+
+      const statusIcon = await waitFor(() => page.send("Runtime.evaluate", {
+        expression: `(() => {
+          const frame = document.getElementById('webui');
+          const icon = frame.contentDocument && frame.contentDocument.querySelector('.status-icon');
+          if (!icon) return null;
+          const style = getComputedStyle(icon);
+          return {
+            className: icon.className,
+            title: icon.getAttribute('title'),
+            alt: icon.getAttribute('alt'),
+            ariaLabel: icon.getAttribute('aria-label'),
+            backgroundColor: style.backgroundColor,
+            diagnostics: frame.contentWindow.__a0Diagnostics,
+          };
+        })()`,
+        returnByValue: true,
+      }).then((r) => r.result.result.value));
+
+      expect(statusIcon).toEqual({
+        className: "status-icon",
+        title: "Degraded (polling fallback)",
+        alt: "Degraded (polling fallback)",
+        ariaLabel: "Degraded (polling fallback)",
+        backgroundColor: "rgb(255, 165, 0)",
+        diagnostics: { mode: "DEGRADED", transport: "polling" },
+      });
+
+      await waitFor(() => a0Server.requests.socketIoUpgrades > 0);
+      await waitFor(() => a0Server.requests.pollRequests > 0);
+    } finally {
+      browserCdp.close();
+      browser.proc.kill();
+      wsServer.server.close();
+      a0Server.server.close();
+      fs.rmSync(browser.userDataDir, { recursive: true, force: true });
     }
   }, 20000);
 });
