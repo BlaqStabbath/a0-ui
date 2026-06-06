@@ -27,6 +27,11 @@ def test_load_config_reads_a0_webui_url_env_var():
     assert config.webui_url == "http://example:9999"
 
 
+def test_load_config_defaults_webui_url_to_ipv4_loopback():
+    with mock.patch.dict("os.environ", {}, clear=True):
+        assert load_config().webui_url == "http://127.0.0.1:5080"
+
+
 def test_load_config_reads_a0_container_env_var():
     with mock.patch.dict("os.environ", {"A0_CONTAINER": "my-container"}, clear=True):
         config = load_config()

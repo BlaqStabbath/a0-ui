@@ -47,7 +47,7 @@ async function bootUi({ withTransport = true } = {}) {
         api: {
           get_status: async () => ({
             container: "agent-zero",
-            webui_url: "http://localhost:5080",
+            webui_url: "http://127.0.0.1:5080",
             entry_cmd: "a0",
             ws_port: 12345,
             http_port: 23456,
@@ -103,7 +103,7 @@ describe("index.html terminal WebSocket lifecycle", () => {
   it("initializes the Web UI iframe even if terminal transport script is missing", async () => {
     const { dom } = await bootUi({ withTransport: false });
 
-    expect(dom.window.document.getElementById("webui").src).toBe("http://localhost:5080/");
+    expect(dom.window.document.getElementById("webui").src).toBe("http://127.0.0.1:5080/");
     expect(dom.window.document.querySelector(".pane.active").id).toBe("webui-pane");
   });
 

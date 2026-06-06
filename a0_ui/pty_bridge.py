@@ -8,7 +8,7 @@ asynchronously as they arrive; pollers query the OutputBuffer.
 from __future__ import annotations
 
 import os
-import subprocess
+import signal
 import threading
 import struct
 import fcntl
@@ -23,7 +23,7 @@ class PtyBridge:
         self.command = command
         self.buffer = OutputBuffer(max_bytes=max_buffer_bytes)
         self._master_fd: int | None = None
-        self._proc: subprocess.Popen | None = None
+        self._child_pid: int | None = None
         self._subscribers: list[Callable[[bytes], None]] = []
         self._stopped = False
         self._lock = threading.Lock()
@@ -32,17 +32,12 @@ class PtyBridge:
     def start(self) -> None:
         import pty as _pty
 
-        master_fd, slave_fd = _pty.openpty()
+        child_pid, master_fd = _pty.fork()
+        if child_pid == 0:
+            os.execlp("sh", "sh", "-c", self.command)
+
         self._master_fd = master_fd
-        self._proc = subprocess.Popen(
-            self.command,
-            shell=True,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
-        os.close(slave_fd)
+        self._child_pid = child_pid
         self._reader_thread = threading.Thread(target=self._reader, daemon=True)
         self._reader_thread.start()
 
@@ -75,6 +70,11 @@ class PtyBridge:
             return
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
+        if self._child_pid is not None:
+            try:
+                os.killpg(self._child_pid, signal.SIGWINCH)
+            except ProcessLookupError:
+                pass
 
     def read_since(self, seq: int) -> tuple[int, bytes]:
         return self.buffer.drain_since(seq)
@@ -90,11 +90,12 @@ class PtyBridge:
 
     def stop(self) -> None:
         self._stopped = True
-        if self._proc is not None:
+        if self._child_pid is not None:
             try:
-                self._proc.terminate()
+                os.killpg(self._child_pid, signal.SIGTERM)
             except Exception:
                 pass
+            self._child_pid = None
         if self._master_fd is not None:
             try:
                 os.close(self._master_fd)

@@ -63,7 +63,7 @@ function makeHarness(wsPort) {
     .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/xterm@[\s\S]*?<\/script>/, "<script>window.__termWrites=[]; window.Terminal=class{constructor(){this.cols=101;this.rows=33} loadAddon(){} open(){} focus(){} write(data){window.__termWrites.push(String(data))} onData(cb){this._onData=cb}}</script>")
     .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/xterm-addon-fit@[\s\S]*?<\/script>/, "<script>window.FitAddon={FitAddon:class{fit(){}}}</script>")
     .replace('<script src="./js/transport.js"></script>', `<script>${transport}</script>`)
-    .replace("<script>\nconst createTransport", `<script>\nwindow.pywebview={api:{get_status:async()=>({container:"agent-zero",webui_url:"http://localhost:5080",entry_cmd:"a0",ws_port:${wsPort},http_port:9}),get_logs:async()=>"",open_webui:async()=>({ok:true}),restart_a0:async()=>({ok:true})}};\nconst createTransport`);
+    .replace("<script>\nconst createTransport", `<script>\nwindow.pywebview={api:{get_status:async()=>({container:"agent-zero",webui_url:"http://127.0.0.1:5080",entry_cmd:"a0",ws_port:${wsPort},http_port:9}),get_logs:async()=>"",open_webui:async()=>({ok:true}),restart_a0:async()=>({ok:true})}};\nconst createTransport`);
 }
 
 async function launchChromium() {
@@ -165,7 +165,7 @@ describe("Chromium terminal WebSocket E2E", () => {
         returnByValue: true,
       });
       await waitFor(() => page.send("Runtime.evaluate", {
-        expression: "document.getElementById('webui').src === 'http://localhost:5080/'",
+        expression: "document.getElementById('webui').src === 'http://127.0.0.1:5080/'",
         returnByValue: true,
       }).then((r) => r.result.result.value));
 

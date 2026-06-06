@@ -6,7 +6,7 @@ A tiny cross-platform desktop wrapper that embeds the Agent Zero Web UI in a ded
 - Windows -> system WebView2 (Edge / Chromium, preinstalled on Win 10/11)
 - macOS   -> system WKWebView (Safari engine)
 
-The app loads http://localhost:5080 (configurable via `A0_WEBUI_URL`) and provides three tabs:
+The app loads http://127.0.0.1:5080 (configurable via `A0_WEBUI_URL`) and provides three tabs:
 
 | Tab      | What it does |
 |----------|---|
@@ -22,7 +22,7 @@ The Terminal tab is also useful as a generic shell for debugging the container (
 
 - Docker running the Agent Zero container (default name: `agent-zero`)
 - Python 3.10+ on the host
-- The Agent Zero Web UI reachable at `http://localhost:5080`
+- The Agent Zero Web UI reachable at `http://127.0.0.1:5080`
 
 ---
 
@@ -97,7 +97,7 @@ The dump includes the pywebview backend, `DISPLAY` / `XAUTHORITY` / `WAYLAND_DIS
 
 | Variable       | Default                  | Meaning                                                 |
 |----------------|--------------------------|---------------------------------------------------------|
-| `A0_WEBUI_URL` | `http://localhost:5080`  | URL the app embeds                                      |
+| `A0_WEBUI_URL` | `http://127.0.0.1:5080`  | URL the app embeds                                      |
 | `A0_CONTAINER` | `agent-zero`             | Docker container name used by Restart a0 and Logs       |
 | `A0_CLI_CMD`   | `a0`                     | Entry command launched in the embedded Terminal. The host shell (`bash` on Linux/macOS, `cmd.exe` on Windows) is preserved. |
 | `A0_DEBUG`     | unset                    | Set to `1` to enable diagnostic dump to stderr. CLI flag `--debug` also enables it and takes precedence. |

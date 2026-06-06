@@ -23,7 +23,7 @@ class Config:
 def load_config() -> Config:
     platform = _PLATFORM_MAP.get(sys.platform, sys.platform)
     return Config(
-        webui_url=os.environ.get("A0_WEBUI_URL", "http://localhost:5080"),
+        webui_url=os.environ.get("A0_WEBUI_URL", "http://127.0.0.1:5080"),
         container=os.environ.get("A0_CONTAINER", "agent-zero"),
         entry_cmd=os.environ.get("A0_CLI_CMD", "a0"),
         platform=platform,

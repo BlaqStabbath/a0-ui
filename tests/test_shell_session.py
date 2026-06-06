@@ -62,6 +62,22 @@ def test_pty_bridge_buffer_records_output():
     bridge.stop()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses controlling PTY)")
+def test_pty_bridge_child_has_controlling_terminal_for_job_control():
+    bridge = PtyBridge(
+        'bash -ic "echo job-control-check; jobs >/dev/null; echo job-control-ok; exit"'
+    )
+    bridge.start()
+    time.sleep(0.8)
+    _, data = bridge.read_since(0)
+    bridge.stop()
+
+    output = data.decode("utf-8", errors="replace")
+    assert "job-control-ok" in output
+    assert "cannot set terminal process group" not in output
+    assert "no job control" not in output
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses PTY ioctl)")
 def test_shell_session_resize_message_resizes_pty():
     bridge = PtyBridge('bash -c "stty size; sleep 0.5; stty size; exit 0"')
