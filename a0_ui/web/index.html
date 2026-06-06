@@ -37,7 +37,7 @@
 <div id="tabs">
   <div class="tab" data-pane="webui-pane">Web UI</div>
   <div class="tab" data-pane="logs-pane">Logs</div>
-  <div class="tab" data-pane="cli-pane">A0 CLI</div>
+  <div class="tab" data-pane="cli-pane">Terminal</div>
 </div>
 <div id="content">
   <div id="webui-pane" class="pane"><iframe id="webui" src="about:blank"></iframe></div>
@@ -51,7 +51,7 @@ let status = {}, term = null, fit = null, ws = null;
 
 async function init(){
   status = await window.pywebview.api.get_status();
-  document.getElementById('status').textContent = 'Container: ' + status.container + ' | WebUI: ' + status.webui_url + ' | CLI: ' + status.cli_cmd;
+  document.getElementById('status').textContent = 'Container: ' + status.container + ' | WebUI: ' + status.webui_url + ' | Shell: ' + status.entry_cmd;
   document.getElementById('webui').src = status.webui_url;
   bindTabs(); bindButtons();
   setActiveTab('webui-pane');
