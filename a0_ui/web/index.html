@@ -5,28 +5,42 @@
 <title>Agent Zero</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
 <style>
-  html,body{margin:0;height:100%;background:#0b1020;color:#eaeefb;font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
-  #toolbar{display:flex;gap:6px;padding:8px;background:#141a2e;border-bottom:1px solid #2a3150;align-items:center}
-  #toolbar button{background:#2a3150;color:#eaeefb;border:1px solid #3a4370;padding:6px 12px;border-radius:4px;cursor:pointer;font:inherit}
-  #toolbar button:hover{background:#3a4370}
-  #toolbar button:disabled{opacity:.5;cursor:not-allowed}
-  #status{margin-left:auto;font-size:12px;color:#8a93b8}
-  #btn-reconnect{display:none;background:#3a4370;color:#eaeefb;border:1px solid #5b8cff;padding:4px 10px;border-radius:4px;cursor:pointer;font:inherit;margin-left:8px}
+  :root{
+    --bg:#0F0B1E;
+    --panel:#15112A;
+    --panel-hi:#1E1B4B;
+    --accent:#7C3AED;
+    --secondary:#3B82F6;
+    --text:#F4F0FF;
+    --muted:#9B8FB9;
+    --line:rgba(124,58,237,.28);
+    --active-fill:rgba(124,58,237,.05);
+    --panel-h:56px;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 "Aptos","Segoe UI",sans-serif;overflow:hidden}
+  #toolbar-panel{height:var(--panel-h);box-sizing:border-box;display:flex;align-items:stretch;justify-content:space-between;gap:16px;padding:0 14px;background:linear-gradient(135deg,var(--panel-hi),var(--bg));border-bottom:1px solid var(--line);box-shadow:0 14px 30px rgba(0,0,0,.18)}
+  #tabs{display:flex;align-items:stretch;gap:2px}
+  .tab{display:flex;align-items:center;padding:0 18px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;background:transparent;letter-spacing:.01em}
+  .tab:hover{color:var(--text);background:rgba(124,58,237,.08)}
+  .tab.active{color:var(--text);background:var(--active-fill);border-bottom:2px solid var(--accent)}
+  #toolbar-actions{margin-left:auto;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+  #toolbar-actions button{background:rgba(15,11,30,.5);color:var(--text);border:1px solid var(--accent);padding:7px 10px;border-radius:6px;cursor:pointer;font:inherit;line-height:1;white-space:nowrap}
+  #toolbar-actions button:hover{background:var(--accent)}
+  #toolbar-actions button:disabled{opacity:.5;cursor:not-allowed}
+  #status{max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}
+  #btn-reconnect{display:none;border-color:var(--secondary)}
   #btn-reconnect.visible{display:inline-block}
-  #tabs{display:flex;background:#0f1525;border-bottom:1px solid #2a3150}
-  .tab{padding:8px 16px;cursor:pointer;border-right:1px solid #2a3150;color:#8a93b8}
-  .tab.active{background:#0b1020;color:#eaeefb;border-bottom:2px solid #5b8cff}
-  #content{position:absolute;top:80px;left:0;right:0;bottom:0}
+  #content{position:absolute;top:var(--panel-h);left:0;right:0;bottom:0}
   .pane{position:absolute;inset:0;display:none}
   .pane.active{display:block}
   #webui-pane iframe{width:100%;height:100%;border:0;background:#fff}
   #logs-pane{padding:12px;overflow:auto}
   #logs-pane pre{margin:0;white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#cfd6f0}
-  #cli-pane{background:#000;padding:0}
-  #cli-pane .xterm{height:100%;width:100%}
-  #cli-pane .xterm-viewport{background:#000}
-  #cli-pane .xterm-screen{height:100%}
-  #status-dot{width:10px;height:10px;border-radius:50%;background:#888;display:inline-block;margin-left:8px;vertical-align:middle;transition:background-color 0.2s}
+  #cli-pane{background:var(--bg);padding:0;border:0}
+  #cli-pane .xterm{height:100%;width:100%;border:0}
+  #cli-pane .xterm-viewport{background:var(--bg)}
+  #cli-pane .xterm-screen{height:100%;width:100%;border:0}
+  #status-dot{width:10px;height:10px;border-radius:50%;background:var(--secondary);display:inline-block;vertical-align:middle;transition:background-color 0.2s;box-shadow:0 0 14px rgba(59,130,246,.45)}
   #status-dot.ws{background:#4ade80}
   #status-dot.disconnected{background:#ef4444}
   #status-dot.retrying{background:#f59e0b}
@@ -34,19 +48,19 @@
 </style>
 </head>
 <body>
-<div id="toolbar">
-  <button id="btn-refresh">Refresh</button>
-  <button id="btn-restart">Restart A0</button>
-  <button id="btn-logs">View Logs</button>
-  <button id="btn-cli">A0 CLI</button>
-  <span id="status">loading...</span>
-  <span id="status-dot" class="ws" title="transport: connecting…"></span>
-  <button id="btn-reconnect">Reconnect</button>
-</div>
-<div id="tabs">
-  <div class="tab" data-pane="webui-pane">Web UI</div>
-  <div class="tab" data-pane="logs-pane">Logs</div>
-  <div class="tab" data-pane="cli-pane">Terminal</div>
+<div id="toolbar-panel">
+  <div id="tabs">
+    <div class="tab" data-pane="webui-pane">Web UI</div>
+    <div class="tab" data-pane="logs-pane">Logs</div>
+    <div class="tab" data-pane="cli-pane">Terminal</div>
+  </div>
+  <div id="toolbar-actions">
+    <span id="status">loading...</span>
+    <button id="btn-restart">Restart a0</button>
+    <button id="btn-open-browser">Open in browser</button>
+    <span id="status-dot" class="status-dot ws" title="transport: connecting…"></span>
+    <button id="btn-reconnect">Reconnect</button>
+  </div>
 </div>
 <div id="content">
   <div id="webui-pane" class="pane"><iframe id="webui" src="about:blank"></iframe></div>
@@ -84,16 +98,23 @@ function setActiveTab(pane){
 }
 
 function bindButtons(){
-  document.getElementById('btn-refresh').onclick = () => {
-    const a = document.querySelector('.pane.active').id;
-    if (a === 'webui-pane'){ const f = document.getElementById('webui'); f.src = f.src; }
-    else if (a === 'logs-pane') loadLogs();
-    else if (a === 'cli-pane'){ if (transport && transport.getMode() === 'ws' && ws && ws.readyState === 1) ws.send('\x0c'); }
-  };
   document.getElementById('btn-restart').onclick = restartA0;
-  document.getElementById('btn-logs').onclick = () => setActiveTab('logs-pane');
-  document.getElementById('btn-cli').onclick = () => setActiveTab('cli-pane');
+  document.getElementById('btn-open-browser').onclick = openWebUi;
   document.getElementById('btn-reconnect').onclick = manualReconnect;
+}
+
+async function openWebUi(){
+  const btn = document.getElementById('btn-open-browser');
+  btn.disabled = true;
+  try {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_webui) {
+      await window.pywebview.api.open_webui();
+    } else {
+      window.open(status.webui_url, '_blank', 'noopener');
+    }
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function loadLogs(){
@@ -137,7 +158,7 @@ function updateStatusDot(){
   dot.className = 'status-dot ' + mode;
   dot.title = 'transport: ' + mode;
   if (reconnectBtn) {
-    reconnectBtn.classList.toggle('visible', mode === 'polling' || mode === 'disconnected');
+    reconnectBtn.classList.toggle('visible', mode === 'polling');
   }
 }
 

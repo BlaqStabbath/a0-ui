@@ -8,6 +8,7 @@ import time
 import socket
 import shutil
 import sys
+import webbrowser
 import webview
 
 from a0_ui.polling import serve_polling
@@ -82,6 +83,11 @@ def restart_a0() -> dict:
     return {"ok": True}
 
 
+def open_webui() -> dict:
+    url = load_config().webui_url
+    return {"ok": webbrowser.open(url)}
+
+
 def _free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -122,6 +128,9 @@ class Api:
 
     def restart_a0(self):
         return restart_a0()
+
+    def open_webui(self):
+        return open_webui()
 
 
 def _parse_args() -> argparse.Namespace:
