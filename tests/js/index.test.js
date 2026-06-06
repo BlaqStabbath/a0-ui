@@ -18,6 +18,7 @@ async function bootUi({ withTransport = true } = {}) {
   const sockets = [];
   const termWrites = [];
   const terminalOptions = [];
+  const terminalInstances = [];
 
   class FakeWebSocket {
     static OPEN = 1;
@@ -61,7 +62,10 @@ async function bootUi({ withTransport = true } = {}) {
         constructor(options) {
           this.cols = 120;
           this.rows = 40;
+          this.resizes = [];
+          this._core = { _renderService: { dimensions: { css: { cell: { width: 10, height: 20 } } } } };
           terminalOptions.push(options);
+          terminalInstances.push(this);
         }
         loadAddon() {}
         open() {}
@@ -71,6 +75,11 @@ async function bootUi({ withTransport = true } = {}) {
         }
         onData(callback) {
           this.onDataCallback = callback;
+        }
+        resize(cols, rows) {
+          this.cols = cols;
+          this.rows = rows;
+          this.resizes.push({ cols, rows });
         }
       };
       window.FitAddon = { FitAddon: class { fit() {} } };
@@ -83,7 +92,7 @@ async function bootUi({ withTransport = true } = {}) {
   await Promise.resolve();
   await Promise.resolve();
 
-  return { dom, sockets, termWrites, terminalOptions };
+  return { dom, sockets, termWrites, terminalOptions, terminalInstances };
 }
 
 afterEach(() => {
@@ -115,6 +124,17 @@ describe("index.html terminal WebSocket lifecycle", () => {
     expect(terminalOptions[0].fontSize).toBe(14);
     expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).height).toBe("100%");
     expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).width).toBe("100%");
+  });
+
+  it("manually resizes terminal to the content panel dimensions", async () => {
+    const { dom, terminalInstances } = await bootUi();
+    const termEl = dom.window.document.getElementById("term");
+    termEl.getBoundingClientRect = () => ({ width: 1000, height: 600 });
+
+    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+
+    const terminal = terminalInstances[0];
+    expect(terminal.resizes.at(-1)).toEqual({ cols: 100, rows: 30 });
   });
 
   it("sends terminal size to the PTY when the WebSocket opens", async () => {

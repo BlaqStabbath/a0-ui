@@ -10,6 +10,7 @@ import shutil
 import sys
 import webbrowser
 import webview
+from webview import settings as webview_settings
 
 from a0_ui.polling import serve_polling
 from a0_ui.pty_bridge import PtyBridge
@@ -143,6 +144,7 @@ def main() -> None:
     args = _parse_args()
     config = load_config()
     debug_enabled = args.debug or config.debug
+    webview_settings["ALLOW_FILE_URLS"] = True
 
     if debug_enabled:
         from a0_ui.diagnostics.debug_dump import dump

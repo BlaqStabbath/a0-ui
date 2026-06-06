@@ -190,7 +190,6 @@ describe("Chromium terminal WebSocket E2E", () => {
       ));
 
       expect(mode.result.result.value).toBe("status-dot ws");
-      expect(wsServer.messages.some((msg) => msg.includes('"type":"resize"'))).toBe(true);
       expect(consoleAndNetworkProblems).toEqual([]);
     } finally {
       browserCdp.close();

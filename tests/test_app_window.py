@@ -18,3 +18,4 @@ def test_main_loads_wrapper_from_file_url():
     assert kwargs["url"].startswith("file://")
     assert kwargs["url"].endswith("a0_ui/web/index.html")
     start.assert_called_once_with()
+    assert app.webview_settings["ALLOW_FILE_URLS"] is True

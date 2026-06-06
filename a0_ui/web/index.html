@@ -200,15 +200,34 @@ function sendTerminalResize(){
   ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
 }
 
+function manualFitTerminal(){
+  if (!term) return;
+  const el = document.getElementById('term');
+  const rect = el.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const core = term._core;
+  const dims = core && core._renderService && core._renderService.dimensions;
+  const css = dims && dims.css && dims.css.cell;
+  const cellWidth = css && css.width ? css.width : 8.4;
+  const cellHeight = css && css.height ? css.height : 16.8;
+  const cols = Math.max(20, Math.floor(rect.width / cellWidth));
+  const rows = Math.max(5, Math.floor(rect.height / cellHeight));
+  if (typeof term.resize === 'function' && (cols !== term.cols || rows !== term.rows)) {
+    term.resize(cols, rows);
+  }
+}
+
 function fitTerminal(){
   if (!fit || !term || !document.getElementById('cli-pane').classList.contains('active')) return;
   requestAnimationFrame(() => {
     fit.fit();
+    manualFitTerminal();
     sendTerminalResize();
     setTimeout(() => {
       fit.fit();
+      manualFitTerminal();
       sendTerminalResize();
-    }, 80);
+    }, 120);
   });
 }
 
