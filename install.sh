@@ -65,6 +65,7 @@ Type=Application
 Name=Agent Zero
 Comment=Agent Zero desktop UI
 Exec="$HERE/.venv/bin/python" -m a0_ui
+Path=$HERE
 Icon=$HERE/icons/icon.svg
 Terminal=false
 Categories=Development;Utility;
