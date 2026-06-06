@@ -1,38 +1,31 @@
-"""shell_session: PTY <-> WebSocket bridge.
+"""shell_session: WebSocket transport for a PtyBridge.
 
-Exposes `serve_shell_session` so tests can drive the bridge end-to-end
-without going through the full app.main() entry point.
+Subscribes to bridge output and forwards it to the WebSocket client.
+Receives WebSocket messages and writes them to the bridge (PTY input).
 """
+from __future__ import annotations
+
 import asyncio
-import os
-import subprocess
 
 from websockets.asyncio.server import serve
 
+from a0_ui.pty_bridge import PtyBridge
 
-async def _handler(ws, command: str) -> None:
-    import pty as _pty
 
-    master_fd, slave_fd = _pty.openpty()
-    proc = subprocess.Popen(
-        command,
-        shell=True,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        close_fds=True,
-    )
-    os.close(slave_fd)
-
+async def _handler(ws, bridge: PtyBridge) -> None:
     loop = asyncio.get_running_loop()
 
-    def on_read() -> None:
+    # Replay buffered output first so a freshly-connected client sees the
+    # current terminal state (prompt, prior output, etc.). Then subscribe
+    # to new bytes for streaming.
+    _, buffered = bridge.read_since(0)
+    if buffered:
         try:
-            data = os.read(master_fd, 4096)
-        except OSError:
+            await ws.send(buffered.decode("utf-8", errors="replace"))
+        except Exception:
             return
-        if not data:
-            return
+
+    def on_data(data: bytes) -> None:
         try:
             asyncio.run_coroutine_threadsafe(
                 ws.send(data.decode("utf-8", errors="replace")), loop
@@ -40,7 +33,7 @@ async def _handler(ws, command: str) -> None:
         except Exception:
             pass
 
-    loop.add_reader(master_fd, on_read)
+    bridge.subscribe(on_data)
     try:
         async for msg in ws:
             data = (
@@ -49,28 +42,14 @@ async def _handler(ws, command: str) -> None:
                 else msg.encode("utf-8", errors="replace")
             )
             try:
-                os.write(master_fd, data)
-            except OSError:
+                bridge.write(data)
+            except Exception:
                 break
     finally:
-        try:
-            loop.remove_reader(master_fd)
-        except Exception:
-            pass
-        try:
-            os.close(master_fd)
-        except Exception:
-            pass
-        try:
-            proc.terminate()
-        except Exception:
-            pass
+        bridge.unsubscribe(on_data)
 
 
-async def serve_shell_session(host: str, port: int, command: str) -> None:
-    """Run a WebSocket server that bridges PTY output to clients.
-
-    Runs forever; cancel the task to stop the server.
-    """
-    async with serve(lambda ws: _handler(ws, command), host, port):
+async def serve_shell_session(bridge: PtyBridge, host: str, port: int) -> None:
+    """Run a WebSocket server attached to `bridge`. Cancel the task to stop."""
+    async with serve(lambda ws: _handler(ws, bridge), host, port):
         await asyncio.Future()  # run until cancelled

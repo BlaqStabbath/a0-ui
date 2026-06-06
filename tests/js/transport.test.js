@@ -61,3 +61,36 @@ describe("transport mode state machine", () => {
     expect(t.getNextDelayMs()).toBe(0);
   });
 });
+
+describe("polling mode", () => {
+  it("transitions to polling when startPolling is called", () => {
+    const t = createTransport();
+    t.startPolling(200);
+    expect(t.getMode()).toBe("polling");
+    expect(t.getPollingInterval()).toBe(200);
+  });
+
+  it("transitions back to ws when stopPolling is called", () => {
+    const t = createTransport();
+    t.startPolling(200);
+    t.stopPolling();
+    expect(t.getMode()).toBe("ws");
+    expect(t.getPollingInterval()).toBe(0);
+  });
+
+  it("onWsClose while in polling does not schedule a retry", () => {
+    const t = createTransport();
+    t.startPolling(200);
+    t.onWsClose();
+    // We're polling, not retrying — close should not change the mode
+    // because polling is its own recovery mechanism.
+    expect(t.getMode()).toBe("polling");
+  });
+
+  it("onWsOpen while in polling transitions back to ws", () => {
+    const t = createTransport();
+    t.startPolling(200);
+    t.onWsOpen();
+    expect(t.getMode()).toBe("ws");
+  });
+});

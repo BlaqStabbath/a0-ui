@@ -1,43 +1,36 @@
-"""Integration tests for shell_session.
-
-Exercises the PTY <-> WebSocket bridge end-to-end with a real PTY and a
-real WebSocket client. The test sets A0_CLI_CMD to a benign command and
-verifies the expected output reaches the WebSocket.
-"""
+"""Integration tests for shell_session (WebSocket transport over PtyBridge)."""
 import asyncio
-import os
+import socket
 import sys
-import unittest.mock as mock
+import threading
+import time
+from unittest import mock
 
 import pytest
 import websockets
 
-from a0_ui.shell_session import _handler
+from a0_ui.pty_bridge import PtyBridge
+from a0_ui.shell_session import _handler  # noqa: F401  (smoke import)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses bash)")
 def test_shell_session_echoes_entry_command_output_to_websocket():
-    """Spawn a benign command via shell_session and verify WS output."""
-    import socket
-    import threading
-
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
 
-    command = 'bash -c "echo hello-from-shell-session; exec bash"'
+    bridge = PtyBridge('bash -c "echo hello-from-shell-session; exec bash"')
+    bridge.start()
 
     server_ready = threading.Event()
 
     async def runner():
         async with websockets.serve(
-            lambda ws: _handler(ws, command), "127.0.0.1", port
+            lambda ws: _handler(ws, bridge), "127.0.0.1", port
         ):
             server_ready.set()
-            await asyncio.Future()  # run until cancelled
-
-    import time
+            await asyncio.Future()
 
     def server_thread():
         asyncio.run(runner())
@@ -45,7 +38,7 @@ def test_shell_session_echoes_entry_command_output_to_websocket():
     t = threading.Thread(target=server_thread, daemon=True)
     t.start()
     server_ready.wait(timeout=2.0)
-    time.sleep(0.2)  # let the server fully bind
+    time.sleep(0.2)
 
     async def client():
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
@@ -54,3 +47,15 @@ def test_shell_session_echoes_entry_command_output_to_websocket():
 
     output = asyncio.run(client())
     assert "hello-from-shell-session" in output
+
+    bridge.stop()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses bash)")
+def test_pty_bridge_buffer_records_output():
+    bridge = PtyBridge('bash -c "echo buffered-output; exit 0"')
+    bridge.start()
+    time.sleep(0.5)  # let the echo happen
+    seq, data = bridge.read_since(0)
+    assert "buffered-output" in data.decode("utf-8", errors="replace")
+    bridge.stop()

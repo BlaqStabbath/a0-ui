@@ -6,7 +6,12 @@
     root.a0Transport = exported;
   }
 })(typeof window !== "undefined" ? window : globalThis, function () {
-  const MODE = { WS: "ws", DISCONNECTED: "disconnected", RETRYING: "retrying" };
+  const MODE = {
+    WS: "ws",
+    DISCONNECTED: "disconnected",
+    RETRYING: "retrying",
+    POLLING: "polling",
+  };
 
   const MAX_ATTEMPTS = 5;
   const BACKOFF_BASE_MS = 100;
@@ -16,6 +21,7 @@
     let mode = MODE.WS;
     let attempts = 0;
     let pendingDelay = 0;
+    let pollingInterval = 0;
 
     function getMode() {
       return mode;
@@ -29,13 +35,21 @@
       return pendingDelay;
     }
 
+    function getPollingInterval() {
+      return pollingInterval;
+    }
+
     function onWsOpen() {
       attempts = 0;
       pendingDelay = 0;
+      pollingInterval = 0;
       mode = MODE.WS;
     }
 
     function onWsClose() {
+      // If we're in polling mode, the close is informational; polling
+      // handles its own recovery. Don't change the mode.
+      if (mode === MODE.POLLING) return;
       attempts++;
       if (attempts >= MAX_ATTEMPTS) {
         mode = MODE.DISCONNECTED;
@@ -50,7 +64,28 @@
       pendingDelay = 0;
     }
 
-    return { getMode, getAttempts, getNextDelayMs, clearPending, onWsOpen, onWsClose, MODE };
+    function startPolling(intervalMs) {
+      pollingInterval = intervalMs;
+      mode = MODE.POLLING;
+    }
+
+    function stopPolling() {
+      pollingInterval = 0;
+      if (mode === MODE.POLLING) mode = MODE.WS;
+    }
+
+    return {
+      getMode,
+      getAttempts,
+      getNextDelayMs,
+      getPollingInterval,
+      clearPending,
+      onWsOpen,
+      onWsClose,
+      startPolling,
+      stopPolling,
+      MODE,
+    };
   }
 
   return { createTransport, MODE };

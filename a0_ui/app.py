@@ -9,8 +9,9 @@ import socket
 import shutil
 import sys
 import webview
-from websockets.asyncio.server import serve
 
+from a0_ui.polling import serve_polling
+from a0_ui.pty_bridge import PtyBridge
 from a0_ui.runtime.config import load_config
 from a0_ui.shell_session import serve_shell_session
 from a0_ui.terminal.command_builder import build_shell_command
@@ -18,6 +19,7 @@ from a0_ui.terminal.command_builder import build_shell_command
 WINDOW_W, WINDOW_H = 1200, 800
 
 _ws_port = [0]
+_http_port = [0]
 
 
 def get_status() -> dict:
@@ -27,6 +29,7 @@ def get_status() -> dict:
         "container": config.container,
         "entry_cmd": config.entry_cmd,
         "ws_port": _ws_port[0],
+        "http_port": _http_port[0],
         "platform": config.platform,
     }
 
@@ -87,17 +90,27 @@ def _free_port() -> int:
     return p
 
 
-def _start_ws() -> None:
-    port = _free_port()
-    _ws_port[0] = port
+def _start_servers() -> PtyBridge:
     config = load_config()
     command = build_shell_command(config.entry_cmd)
+    bridge = PtyBridge(command)
+    bridge.start()
 
-    def runner():
-        asyncio.run(serve_shell_session("127.0.0.1", port, command))
+    ws_port = _free_port()
+    http_port = _free_port()
+    _ws_port[0] = ws_port
+    _http_port[0] = http_port
 
-    threading.Thread(target=runner, daemon=True).start()
+    def run_ws():
+        asyncio.run(serve_shell_session(bridge, "127.0.0.1", ws_port))
+
+    def run_http():
+        serve_polling(bridge, "127.0.0.1", http_port)
+
+    threading.Thread(target=run_ws, daemon=True).start()
+    threading.Thread(target=run_http, daemon=True).start()
     time.sleep(0.3)
+    return bridge
 
 
 class Api:
@@ -120,8 +133,6 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     config = load_config()
-    # CLI flag wins over env var. Env var is already in config.debug; override
-    # if --debug was passed.
     debug_enabled = args.debug or config.debug
 
     if debug_enabled:
@@ -132,21 +143,19 @@ def main() -> None:
 
         dump(_WindowStub())
 
-    _start_ws()
+    _start_servers()
     api = Api()
     html_path = os.path.join(os.path.dirname(__file__), "web", "index.html")
     window = webview.create_window(
         "Agent Zero",
         url="file://" + html_path,
         width=WINDOW_W,
-        height=WINDOW_H,
+        height=HINDOW_H,
         js_api=api,
         confirm_close=False,
     )
 
     if debug_enabled:
-        # Re-dump with the real window once it exists (geometry is available
-        # only after the window is created).
         from a0_ui.diagnostics.debug_dump import dump
 
         dump(window)

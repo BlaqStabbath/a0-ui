@@ -11,6 +11,8 @@
   #toolbar button:hover{background:#3a4370}
   #toolbar button:disabled{opacity:.5;cursor:not-allowed}
   #status{margin-left:auto;font-size:12px;color:#8a93b8}
+  #btn-reconnect{display:none;background:#3a4370;color:#eaeefb;border:1px solid #5b8cff;padding:4px 10px;border-radius:4px;cursor:pointer;font:inherit;margin-left:8px}
+  #btn-reconnect.visible{display:inline-block}
   #tabs{display:flex;background:#0f1525;border-bottom:1px solid #2a3150}
   .tab{padding:8px 16px;cursor:pointer;border-right:1px solid #2a3150;color:#8a93b8}
   .tab.active{background:#0b1020;color:#eaeefb;border-bottom:2px solid #5b8cff}
@@ -28,6 +30,7 @@
   #status-dot.ws{background:#4ade80}
   #status-dot.disconnected{background:#ef4444}
   #status-dot.retrying{background:#f59e0b}
+  #status-dot.polling{background:#facc15}
 </style>
 </head>
 <body>
@@ -38,6 +41,7 @@
   <button id="btn-cli">A0 CLI</button>
   <span id="status">loading...</span>
   <span id="status-dot" class="ws" title="transport: connecting…"></span>
+  <button id="btn-reconnect">Reconnect</button>
 </div>
 <div id="tabs">
   <div class="tab" data-pane="webui-pane">Web UI</div>
@@ -54,9 +58,11 @@
 <script src="./js/transport.js"></script>
 <script>
 const { createTransport } = window.a0Transport;
+const POLLING_INTERVAL_MS = 200;
 
 let status = {}, term = null, fit = null, ws = null;
 let transport = null;
+let pollState = { lastSeq: 0, timer: null, active: false };
 
 async function init(){
   status = await window.pywebview.api.get_status();
@@ -82,11 +88,12 @@ function bindButtons(){
     const a = document.querySelector('.pane.active').id;
     if (a === 'webui-pane'){ const f = document.getElementById('webui'); f.src = f.src; }
     else if (a === 'logs-pane') loadLogs();
-    else if (a === 'cli-pane'){ if (ws && ws.readyState === 1) ws.send('\x0c'); }
+    else if (a === 'cli-pane'){ if (transport && transport.getMode() === 'ws' && ws && ws.readyState === 1) ws.send('\x0c'); }
   };
   document.getElementById('btn-restart').onclick = restartA0;
   document.getElementById('btn-logs').onclick = () => setActiveTab('logs-pane');
   document.getElementById('btn-cli').onclick = () => setActiveTab('cli-pane');
+  document.getElementById('btn-reconnect').onclick = manualReconnect;
 }
 
 async function loadLogs(){
@@ -124,18 +131,73 @@ function setStatus(s){ document.getElementById('status').textContent = s; }
 
 function updateStatusDot(){
   const dot = document.getElementById('status-dot');
+  const reconnectBtn = document.getElementById('btn-reconnect');
   if (!dot || !transport) return;
-  dot.className = 'status-dot ' + transport.getMode();
-  dot.title = 'transport: ' + transport.getMode();
+  const mode = transport.getMode();
+  dot.className = 'status-dot ' + mode;
+  dot.title = 'transport: ' + mode;
+  if (reconnectBtn) {
+    reconnectBtn.classList.toggle('visible', mode === 'polling' || mode === 'disconnected');
+  }
+}
+
+function sendInput(data) {
+  if (!transport) return;
+  if (transport.getMode() === 'ws' && ws && ws.readyState === 1) {
+    ws.send(data);
+  } else if (transport.getMode() === 'polling') {
+    fetch(`http://127.0.0.1:${status.http_port}/pty/input`, {
+      method: 'POST',
+      body: data,
+    }).catch(() => {});
+  }
+}
+
+function startPolling() {
+  if (pollState.active) return;
+  pollState.active = true;
+  pollState.lastSeq = 0;
+  transport.startPolling(POLLING_INTERVAL_MS);
+  updateStatusDot();
+  pollState.timer = setTimeout(pollTick, POLLING_INTERVAL_MS);
+}
+
+function stopPolling() {
+  pollState.active = false;
+  if (pollState.timer) { clearTimeout(pollState.timer); pollState.timer = null; }
+  transport.stopPolling();
+  updateStatusDot();
+}
+
+async function pollTick() {
+  if (!pollState.active) return;
+  try {
+    const resp = await fetch(`http://127.0.0.1:${status.http_port}/pty/output?since=${pollState.lastSeq}`);
+    const seq = parseInt(resp.headers.get('X-Pty-Seq') || '0', 10);
+    const data = await resp.arrayBuffer();
+    if (data.byteLength > 0 && term) {
+      term.write(new Uint8Array(data));
+    }
+    pollState.lastSeq = seq;
+  } catch (e) {
+    // transient; will retry on next tick
+  }
+  if (pollState.active) {
+    pollState.timer = setTimeout(pollTick, POLLING_INTERVAL_MS);
+  }
+}
+
+function manualReconnect() {
+  stopPolling();
+  startTerm();
 }
 
 function startTerm(){
   if (!transport) transport = createTransport();
 
-  if (ws) {
-    try { ws.close(); } catch (e) {}
-    ws = null;
-  }
+  // Tear down any previous state
+  if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  if (pollState.active) stopPolling();
 
   if (!term) {
     term = new Terminal({ cursorBlink: true, fontSize: 20, fontFamily: 'Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace', lineHeight: 1.2, theme: { background: '#000' } });
@@ -161,13 +223,12 @@ function startTerm(){
     else term.write(ev.data);
   };
   ws.onclose = () => {
-    const wasDisconnected = transport.getMode() === 'disconnected';
+    const wasPolling = transport.getMode() === 'polling';
     transport.onWsClose();
     if (transport.getMode() === 'disconnected') {
-      if (!wasDisconnected) {
-        term.write('\r\n\x1b[31m[connection closed — retries exhausted]\x1b[0m\r\n');
-      }
-    } else {
+      term.write('\r\n\x1b[31m[connection closed — retries exhausted; switching to polling]\x1b[0m\r\n');
+      startPolling();
+    } else if (transport.getMode() === 'retrying' && !wasPolling) {
       term.write('\r\n\x1b[33m[connection lost, reconnecting…]\x1b[0m\r\n');
       const delay = transport.getNextDelayMs();
       setTimeout(() => {
@@ -180,7 +241,7 @@ function startTerm(){
     updateStatusDot();
   };
 
-  term.onData(d => { if (ws && ws.readyState === 1) ws.send(d); });
+  term.onData(d => sendInput(d));
 }
 
 window.addEventListener('pywebviewready', init);
