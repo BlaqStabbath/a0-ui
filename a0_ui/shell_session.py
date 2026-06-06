@@ -6,6 +6,7 @@ Receives WebSocket messages and writes them to the bridge (PTY input).
 from __future__ import annotations
 
 import asyncio
+import json
 
 from websockets.asyncio.server import serve
 
@@ -36,6 +37,17 @@ async def _handler(ws, bridge: PtyBridge) -> None:
     bridge.subscribe(on_data)
     try:
         async for msg in ws:
+            if isinstance(msg, str):
+                try:
+                    payload = json.loads(msg)
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict) and payload.get("type") == "resize":
+                    try:
+                        bridge.resize(int(payload["cols"]), int(payload["rows"]))
+                    except Exception:
+                        pass
+                    continue
             data = (
                 bytes(msg)
                 if isinstance(msg, (bytes, bytearray))

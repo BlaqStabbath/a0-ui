@@ -59,6 +59,8 @@ async function bootUi({ withTransport = true } = {}) {
       };
       window.Terminal = class {
         constructor(options) {
+          this.cols = 120;
+          this.rows = 40;
           terminalOptions.push(options);
         }
         loadAddon() {}
@@ -113,6 +115,16 @@ describe("index.html terminal WebSocket lifecycle", () => {
     expect(terminalOptions[0].fontSize).toBe(14);
     expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).height).toBe("100%");
     expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).width).toBe("100%");
+  });
+
+  it("sends terminal size to the PTY when the WebSocket opens", async () => {
+    const { dom, sockets } = await bootUi();
+
+    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    sockets[0].readyState = 1;
+    sockets[0].onopen();
+
+    expect(JSON.parse(sockets[0].sent)).toEqual({ type: "resize", cols: 120, rows: 40 });
   });
 
   it("does not count intentional retry teardown as another WebSocket failure", async () => {

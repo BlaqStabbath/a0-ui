@@ -38,9 +38,9 @@
   #logs-pane pre{margin:0;white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#cfd6f0}
   #cli-pane{background:var(--bg);padding:0;border:0}
   #term{height:100%;width:100%}
-  #cli-pane .xterm{height:100%;width:100%;border:0}
-  #cli-pane .xterm-viewport{background:var(--bg)}
-  #cli-pane .xterm-screen{height:100%;width:100%;border:0}
+  #cli-pane .xterm{height:100%!important;width:100%!important;border:0}
+  #cli-pane .xterm-viewport{height:100%!important;width:100%!important;background:var(--bg)}
+  #cli-pane .xterm-screen{height:100%!important;width:100%!important;border:0}
   #status-dot{width:10px;height:10px;border-radius:50%;background:var(--secondary);display:inline-block;vertical-align:middle;transition:background-color 0.2s;box-shadow:0 0 14px rgba(59,130,246,.45)}
   #status-dot.ws{background:#4ade80}
   #status-dot.disconnected{background:#ef4444}
@@ -80,6 +80,7 @@ let status = {}, term = null, fit = null, ws = null;
 let transport = null;
 let pollState = { lastSeq: 0, timer: null, active: false };
 let closingWsForReconnect = false;
+let terminalResizeObserver = null;
 
 async function init(){
   status = await window.pywebview.api.get_status();
@@ -97,6 +98,7 @@ function setActiveTab(pane){
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.pane === pane));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === pane));
   if (pane === 'cli-pane' && !term) startTerm();
+  if (pane === 'cli-pane' && term) fitTerminal();
   if (pane === 'logs-pane') loadLogs();
 }
 
@@ -192,6 +194,23 @@ function sendInput(data) {
   }
 }
 
+function sendTerminalResize(){
+  if (!term || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+}
+
+function fitTerminal(){
+  if (!fit || !term || !document.getElementById('cli-pane').classList.contains('active')) return;
+  requestAnimationFrame(() => {
+    fit.fit();
+    sendTerminalResize();
+    setTimeout(() => {
+      fit.fit();
+      sendTerminalResize();
+    }, 80);
+  });
+}
+
 function startPolling() {
   if (pollState.active) return;
   pollState.active = true;
@@ -256,10 +275,15 @@ function startTerm(){
     fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(document.getElementById('term'));
-    window.addEventListener('resize', () => fit.fit());
+    window.addEventListener('resize', fitTerminal);
+    if (window.ResizeObserver) {
+      terminalResizeObserver = new ResizeObserver(fitTerminal);
+      terminalResizeObserver.observe(document.getElementById('cli-pane'));
+      terminalResizeObserver.observe(document.getElementById('term'));
+    }
   }
 
-  requestAnimationFrame(() => fit.fit());
+  fitTerminal();
   updateStatusDot();
 
   ws = new WebSocket('ws://127.0.0.1:' + status.ws_port + '/');
@@ -268,6 +292,7 @@ function startTerm(){
   ws.onopen = () => {
     transport.onWsOpen();
     updateStatusDot();
+    fitTerminal();
     term.focus();
   };
   ws.onmessage = ev => {

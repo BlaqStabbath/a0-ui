@@ -10,6 +10,9 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+import struct
+import fcntl
+import termios
 from typing import Callable
 
 from a0_ui.pty.output_buffer import OutputBuffer
@@ -64,6 +67,14 @@ class PtyBridge:
         if self._master_fd is None:
             raise RuntimeError("PtyBridge not started")
         os.write(self._master_fd, data)
+
+    def resize(self, cols: int, rows: int) -> None:
+        if self._master_fd is None:
+            raise RuntimeError("PtyBridge not started")
+        if cols <= 0 or rows <= 0:
+            return
+        winsize = struct.pack("HHHH", rows, cols, 0, 0)
+        fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
 
     def read_since(self, seq: int) -> tuple[int, bytes]:
         return self.buffer.drain_since(seq)

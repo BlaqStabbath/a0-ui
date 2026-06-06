@@ -1,7 +1,7 @@
 from unittest import mock
 
 
-def test_main_serves_wrapper_from_local_http_server_not_file_origin():
+def test_main_loads_wrapper_from_file_url():
     from a0_ui import app
 
     fake_window = mock.MagicMock()
@@ -15,10 +15,6 @@ def test_main_serves_wrapper_from_local_http_server_not_file_origin():
         app.main()
 
     kwargs = create_window.call_args.kwargs
+    assert kwargs["url"].startswith("file://")
     assert kwargs["url"].endswith("a0_ui/web/index.html")
-    assert not kwargs["url"].startswith("file://")
-
-    start.assert_called_once()
-    start_kwargs = start.call_args.kwargs
-    assert start_kwargs["private_mode"] is False
-    assert start_kwargs["storage_path"].endswith(".local/share/a0-ui/webview")
+    start.assert_called_once_with()

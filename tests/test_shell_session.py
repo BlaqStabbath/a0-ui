@@ -62,6 +62,38 @@ def test_pty_bridge_buffer_records_output():
     bridge.stop()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses PTY ioctl)")
+def test_shell_session_resize_message_resizes_pty():
+    bridge = PtyBridge('bash -c "stty size; sleep 0.5; stty size; exit 0"')
+    bridge.start()
+
+    async def resize_client():
+        class FakeWs:
+            async def send(self, _data):
+                pass
+
+            def __aiter__(self):
+                self._messages = iter(['{"type":"resize","cols":132,"rows":43}'])
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._messages)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        await _handler(FakeWs(), bridge)
+
+    try:
+        asyncio.run(resize_client())
+        time.sleep(0.8)
+        _, data = bridge.read_since(0)
+    finally:
+        bridge.stop()
+
+    assert "43 132" in data.decode("utf-8", errors="replace")
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses bash)")
 def test_app_start_servers_publishes_browser_origin_websocket():
     with mock.patch.dict(

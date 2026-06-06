@@ -18,7 +18,6 @@ from a0_ui.shell_session import serve_shell_session
 from a0_ui.terminal.command_builder import build_shell_command
 
 WINDOW_W, WINDOW_H = 1200, 800
-STORAGE_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "a0-ui", "webview")
 
 _ws_port = [0]
 _http_port = [0]
@@ -158,7 +157,7 @@ def main() -> None:
     html_path = os.path.join(os.path.dirname(__file__), "web", "index.html")
     window = webview.create_window(
         "Agent Zero",
-        url=html_path,
+        url="file://" + html_path,
         width=WINDOW_W,
         height=WINDOW_H,
         js_api=api,
@@ -170,7 +169,7 @@ def main() -> None:
 
         dump(window)
 
-    webview.start(private_mode=False, storage_path=STORAGE_DIR)
+    webview.start()
 
 
 if __name__ == "__main__":
