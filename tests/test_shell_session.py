@@ -10,6 +10,7 @@ import pytest
 import websockets
 
 from a0_ui.pty_bridge import PtyBridge
+from a0_ui import app
 from a0_ui.shell_session import _handler  # noqa: F401  (smoke import)
 
 
@@ -59,3 +60,27 @@ def test_pty_bridge_buffer_records_output():
     seq, data = bridge.read_since(0)
     assert "buffered-output" in data.decode("utf-8", errors="replace")
     bridge.stop()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses bash)")
+def test_app_start_servers_publishes_browser_origin_websocket():
+    with mock.patch.dict(
+        "os.environ",
+        {"A0_CLI_CMD": 'printf app-websocket-ready\\\\n; exec bash'},
+        clear=True,
+    ):
+        bridge = app._start_servers()
+
+    async def client():
+        async with websockets.connect(
+            f"ws://127.0.0.1:{app._ws_port[0]}/",
+            origin="null",
+        ) as ws:
+            return await asyncio.wait_for(ws.recv(), timeout=5.0)
+
+    try:
+        output = asyncio.run(client())
+    finally:
+        bridge.stop()
+
+    assert "app-websocket-ready" in output

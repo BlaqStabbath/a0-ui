@@ -13,16 +13,15 @@ def test_toolbar_panel_uses_single_row_with_tabs_left_and_actions_right():
     assert "justify-content:space-between" in HTML
 
 
-def test_redundant_toolbar_buttons_removed_from_dom_and_handlers():
-    assert "btn-refresh" not in HTML
+def test_redundant_navigation_toolbar_buttons_removed_from_dom_and_handlers():
     assert "btn-logs" not in HTML
     assert "btn-cli" not in HTML
-    assert ">Refresh<" not in HTML
     assert ">View Logs<" not in HTML
     assert ">A0 CLI<" not in HTML
 
 
 def test_primary_actions_match_slice_004():
+    assert 'id="btn-refresh">Refresh</button>' in HTML
     assert 'id="btn-restart">Restart a0</button>' in HTML
     assert 'id="btn-open-browser">Open in browser</button>' in HTML
     assert 'id="status-dot"' in HTML

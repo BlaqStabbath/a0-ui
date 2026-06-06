@@ -56,6 +56,7 @@
   </div>
   <div id="toolbar-actions">
     <span id="status">loading...</span>
+    <button id="btn-refresh">Refresh</button>
     <button id="btn-restart">Restart a0</button>
     <button id="btn-open-browser">Open in browser</button>
     <span id="status-dot" class="status-dot ws" title="transport: connecting…"></span>
@@ -77,6 +78,7 @@ const POLLING_INTERVAL_MS = 200;
 let status = {}, term = null, fit = null, ws = null;
 let transport = null;
 let pollState = { lastSeq: 0, timer: null, active: false };
+let closingWsForReconnect = false;
 
 async function init(){
   status = await window.pywebview.api.get_status();
@@ -98,9 +100,24 @@ function setActiveTab(pane){
 }
 
 function bindButtons(){
+  document.getElementById('btn-refresh').onclick = refreshActivePane;
   document.getElementById('btn-restart').onclick = restartA0;
   document.getElementById('btn-open-browser').onclick = openWebUi;
   document.getElementById('btn-reconnect').onclick = manualReconnect;
+}
+
+function refreshActivePane(){
+  const active = document.querySelector('.pane.active').id;
+  if (active === 'webui-pane') {
+    const frame = document.getElementById('webui');
+    frame.src = frame.src;
+  } else if (active === 'logs-pane') {
+    loadLogs();
+  } else if (active === 'cli-pane') {
+    if (transport && transport.getMode() === 'ws' && ws && ws.readyState === 1) {
+      ws.send('\x0c');
+    }
+  }
 }
 
 async function openWebUi(){
@@ -217,7 +234,16 @@ function startTerm(){
   if (!transport) transport = createTransport();
 
   // Tear down any previous state
-  if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  if (ws) {
+    try {
+      closingWsForReconnect = true;
+      ws.close();
+    } catch (e) {
+    } finally {
+      closingWsForReconnect = false;
+      ws = null;
+    }
+  }
   if (pollState.active) stopPolling();
 
   if (!term) {
@@ -244,6 +270,7 @@ function startTerm(){
     else term.write(ev.data);
   };
   ws.onclose = () => {
+    if (closingWsForReconnect) return;
     const wasPolling = transport.getMode() === 'polling';
     transport.onWsClose();
     if (transport.getMode() === 'disconnected') {
