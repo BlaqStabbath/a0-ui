@@ -75,6 +75,7 @@
 <script>
 const createTransport = window.a0Transport && window.a0Transport.createTransport;
 const POLLING_INTERVAL_MS = 200;
+const REQUIRE_WEBSOCKET = true;
 
 let status = {}, term = null, fit = null, ws = null;
 let transport = null;
@@ -178,7 +179,7 @@ function updateStatusDot(){
   dot.className = 'status-dot ' + mode;
   dot.title = 'transport: ' + mode;
   if (reconnectBtn) {
-    reconnectBtn.classList.toggle('visible', mode === 'polling');
+    reconnectBtn.classList.toggle('visible', mode === 'polling' || mode === 'disconnected');
   }
 }
 
@@ -304,8 +305,12 @@ function startTerm(){
     const wasPolling = transport.getMode() === 'polling';
     transport.onWsClose();
     if (transport.getMode() === 'disconnected') {
-      term.write('\r\n\x1b[31m[connection closed — retries exhausted; switching to polling]\x1b[0m\r\n');
-      startPolling();
+      if (REQUIRE_WEBSOCKET) {
+        term.write('\r\n\x1b[31m[connection closed — WebSocket required; polling fallback disabled]\x1b[0m\r\n');
+      } else {
+        term.write('\r\n\x1b[31m[connection closed — retries exhausted; switching to polling]\x1b[0m\r\n');
+        startPolling();
+      }
     } else if (transport.getMode() === 'retrying' && !wasPolling) {
       term.write('\r\n\x1b[33m[connection lost, reconnecting…]\x1b[0m\r\n');
       const delay = transport.getNextDelayMs();

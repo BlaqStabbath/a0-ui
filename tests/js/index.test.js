@@ -140,4 +140,20 @@ describe("index.html terminal WebSocket lifecycle", () => {
     expect(sockets).toHaveLength(2);
     expect(termWrites.filter((w) => String(w).includes("connection lost"))).toHaveLength(1);
   });
+
+  it("requires WebSocket and does not fall back to polling after retry exhaustion", async () => {
+    vi.useFakeTimers();
+    const { dom, sockets, termWrites } = await bootUi();
+
+    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+    for (let i = 0; i < 5; i++) {
+      sockets.at(-1).onclose();
+      await vi.runOnlyPendingTimersAsync();
+    }
+
+    expect(termWrites.some((w) => String(w).includes("polling fallback disabled"))).toBe(true);
+    expect(dom.window.document.getElementById("status-dot").className).toBe("status-dot disconnected");
+    expect(dom.window.document.getElementById("btn-reconnect").classList.contains("visible")).toBe(true);
+    expect(sockets).toHaveLength(5);
+  });
 });
