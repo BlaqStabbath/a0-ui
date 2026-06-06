@@ -10,6 +10,14 @@ def _safe(getter, label: str) -> str:
         return f"<error: {type(e).__name__}: {e}>"
 
 
+def _backend() -> str:
+    try:
+        import webview  # type: ignore
+        return str(getattr(webview.guilib, "gui", "<unknown>"))
+    except Exception as e:
+        return f"<error: {type(e).__name__}: {e}>"
+
+
 def _x11_errors() -> str:
     try:
         from Xlib import X, display  # type: ignore
@@ -36,11 +44,11 @@ def _display_info() -> str:
 
 def dump(window) -> None:
     print("[debug-dump] === a0-ui diagnostics ===", file=sys.stderr)
-    print(f"[debug-dump] backend: {_safe(lambda: window.backend, 'backend')}", file=sys.stderr)
+    print(f"[debug-dump] backend: {_backend()}", file=sys.stderr)
     print(f"[debug-dump] DISPLAY: {os.environ.get('DISPLAY') or 'null'}", file=sys.stderr)
     print(f"[debug-dump] XAUTHORITY: {os.environ.get('XAUTHORITY') or 'null'}", file=sys.stderr)
     print(f"[debug-dump] WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY') or 'null'}", file=sys.stderr)
-    print(f"[debug-dump] window handle: {_safe(lambda: window.handle, 'handle')}", file=sys.stderr)
+    print(f"[debug-dump] window title: {_safe(lambda: window.title, 'title')}", file=sys.stderr)
     print(
         f"[debug-dump] window geometry: {_safe(lambda: f'{window.x},{window.y} {window.width}x{window.height}', 'geometry')}",
         file=sys.stderr,

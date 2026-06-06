@@ -150,7 +150,7 @@ def main() -> None:
         "Agent Zero",
         url="file://" + html_path,
         width=WINDOW_W,
-        height=HINDOW_H,
+        height=WINDOW_H,
         js_api=api,
         confirm_close=False,
     )
