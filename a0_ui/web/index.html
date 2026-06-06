@@ -24,6 +24,10 @@
   #cli-pane .xterm{height:100%;width:100%}
   #cli-pane .xterm-viewport{background:#000}
   #cli-pane .xterm-screen{height:100%}
+  #status-dot{width:10px;height:10px;border-radius:50%;background:#888;display:inline-block;margin-left:8px;vertical-align:middle;transition:background-color 0.2s}
+  #status-dot.ws{background:#4ade80}
+  #status-dot.disconnected{background:#ef4444}
+  #status-dot.retrying{background:#f59e0b}
 </style>
 </head>
 <body>
@@ -33,6 +37,7 @@
   <button id="btn-logs">View Logs</button>
   <button id="btn-cli">A0 CLI</button>
   <span id="status">loading...</span>
+  <span id="status-dot" class="ws" title="transport: connecting…"></span>
 </div>
 <div id="tabs">
   <div class="tab" data-pane="webui-pane">Web UI</div>
@@ -46,8 +51,12 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="./js/transport.js"></script>
 <script>
+const { createTransport } = window.a0Transport;
+
 let status = {}, term = null, fit = null, ws = null;
+let transport = null;
 
 async function init(){
   status = await window.pywebview.api.get_status();
@@ -113,22 +122,65 @@ async function restartA0(){
 
 function setStatus(s){ document.getElementById('status').textContent = s; }
 
+function updateStatusDot(){
+  const dot = document.getElementById('status-dot');
+  if (!dot || !transport) return;
+  dot.className = 'status-dot ' + transport.getMode();
+  dot.title = 'transport: ' + transport.getMode();
+}
+
 function startTerm(){
-  term = new Terminal({ cursorBlink: true, fontSize: 20, fontFamily: 'Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace', lineHeight: 1.2, theme: { background: '#000' } });
-  fit = new FitAddon.FitAddon();
-  term.loadAddon(fit);
-  term.open(document.getElementById('term'));
+  if (!transport) transport = createTransport();
+
+  if (ws) {
+    try { ws.close(); } catch (e) {}
+    ws = null;
+  }
+
+  if (!term) {
+    term = new Terminal({ cursorBlink: true, fontSize: 20, fontFamily: 'Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace', lineHeight: 1.2, theme: { background: '#000' } });
+    fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById('term'));
+    window.addEventListener('resize', () => fit.fit());
+  }
+
   fit.fit();
+  updateStatusDot();
+
   ws = new WebSocket('ws://127.0.0.1:' + status.ws_port + '/');
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => term.focus();
+
+  ws.onopen = () => {
+    transport.onWsOpen();
+    updateStatusDot();
+    term.focus();
+  };
   ws.onmessage = ev => {
     if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data));
     else term.write(ev.data);
   };
-  ws.onclose = () => term.write('\r\n\x1b[31m[connection closed]\x1b[0m\r\n');
-  term.onData(d => { if (ws.readyState === 1) ws.send(d); });
-  window.addEventListener('resize', () => fit.fit());
+  ws.onclose = () => {
+    const wasDisconnected = transport.getMode() === 'disconnected';
+    transport.onWsClose();
+    if (transport.getMode() === 'disconnected') {
+      if (!wasDisconnected) {
+        term.write('\r\n\x1b[31m[connection closed — retries exhausted]\x1b[0m\r\n');
+      }
+    } else {
+      term.write('\r\n\x1b[33m[connection lost, reconnecting…]\x1b[0m\r\n');
+      const delay = transport.getNextDelayMs();
+      setTimeout(() => {
+        if (transport.getMode() === 'retrying') {
+          transport.clearPending();
+          startTerm();
+        }
+      }, delay);
+    }
+    updateStatusDot();
+  };
+
+  term.onData(d => { if (ws && ws.readyState === 1) ws.send(d); });
 }
 
 window.addEventListener('pywebviewready', init);

@@ -13,3 +13,6 @@ Thumbs.db
 *.log
 .scratch/
 .pytest_cache/
+node_modules/
+package-lock.json
+.vite/
