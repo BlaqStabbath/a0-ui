@@ -71,8 +71,35 @@ def test_polling_server_serves_get_output():
         ) as resp:
             body = resp.read()
             seq_header = int(resp.headers.get("X-Pty-Seq", "0"))
+            cors_header = resp.headers.get("Access-Control-Allow-Origin")
         assert seq_header > 0
         assert b"hello-from-polling" in body
+        assert body[:8] != seq_header.to_bytes(8, "big", signed=False)
+        assert cors_header == "*"
     finally:
         bridge.stop()
 
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses bash)")
+def test_polling_server_allows_browser_preflight():
+    port = _free_port()
+    bridge = PtyBridge('bash -c "sleep 0.2"')
+    bridge.start()
+
+    server_thread = threading.Thread(
+        target=serve_polling, args=(bridge, "127.0.0.1", port), daemon=True
+    )
+    server_thread.start()
+    time.sleep(0.2)
+
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/pty/input",
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            assert resp.status == 204
+            assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+            assert "POST" in resp.headers.get("Access-Control-Allow-Methods", "")
+    finally:
+        bridge.stop()

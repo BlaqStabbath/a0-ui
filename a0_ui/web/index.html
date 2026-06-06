@@ -37,6 +37,7 @@
   #logs-pane{padding:12px;overflow:auto}
   #logs-pane pre{margin:0;white-space:pre-wrap;word-break:break-all;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#cfd6f0}
   #cli-pane{background:var(--bg);padding:0;border:0}
+  #term{height:100%;width:100%}
   #cli-pane .xterm{height:100%;width:100%;border:0}
   #cli-pane .xterm-viewport{background:var(--bg)}
   #cli-pane .xterm-screen{height:100%;width:100%;border:0}
@@ -72,7 +73,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="./js/transport.js"></script>
 <script>
-const { createTransport } = window.a0Transport;
+const createTransport = window.a0Transport && window.a0Transport.createTransport;
 const POLLING_INTERVAL_MS = 200;
 
 let status = {}, term = null, fit = null, ws = null;
@@ -231,6 +232,10 @@ function manualReconnect() {
 }
 
 function startTerm(){
+  if (!createTransport) {
+    if (term) term.write('\r\n\x1b[31m[terminal transport script failed to load]\x1b[0m\r\n');
+    return;
+  }
   if (!transport) transport = createTransport();
 
   // Tear down any previous state
@@ -247,14 +252,14 @@ function startTerm(){
   if (pollState.active) stopPolling();
 
   if (!term) {
-    term = new Terminal({ cursorBlink: true, fontSize: 20, fontFamily: 'Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace', lineHeight: 1.2, theme: { background: '#000' } });
+    term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: 'Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace', lineHeight: 1.2, theme: { background: '#0F0B1E' } });
     fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.open(document.getElementById('term'));
     window.addEventListener('resize', () => fit.fit());
   }
 
-  fit.fit();
+  requestAnimationFrame(() => fit.fit());
   updateStatusDot();
 
   ws = new WebSocket('ws://127.0.0.1:' + status.ws_port + '/');

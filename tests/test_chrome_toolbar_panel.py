@@ -40,5 +40,7 @@ def test_slice_004_palette_and_active_tab_treatment_are_present():
 
 def test_terminal_pane_has_zero_padding_and_no_border():
     assert "#cli-pane{background:var(--bg);padding:0;border:0}" in HTML
+    assert "#term{height:100%;width:100%}" in HTML
     assert "#cli-pane .xterm{height:100%;width:100%;border:0}" in HTML
     assert "#cli-pane .xterm-screen{height:100%;width:100%;border:0}" in HTML
+    assert "fontSize: 14" in HTML

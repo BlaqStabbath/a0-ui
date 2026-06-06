@@ -14,9 +14,10 @@ function inlineOnlyHtml() {
     .replace(/<script src="\.\/js\/transport\.js"><\/script>/g, "");
 }
 
-async function bootUi() {
+async function bootUi({ withTransport = true } = {}) {
   const sockets = [];
   const termWrites = [];
+  const terminalOptions = [];
 
   class FakeWebSocket {
     static OPEN = 1;
@@ -41,7 +42,7 @@ async function bootUi() {
     runScripts: "dangerously",
     url: "file:///a0_ui/web/index.html",
     beforeParse(window) {
-      window.a0Transport = { createTransport };
+      if (withTransport) window.a0Transport = { createTransport };
       window.pywebview = {
         api: {
           get_status: async () => ({
@@ -57,6 +58,9 @@ async function bootUi() {
         },
       };
       window.Terminal = class {
+        constructor(options) {
+          terminalOptions.push(options);
+        }
         loadAddon() {}
         open() {}
         focus() {}
@@ -69,6 +73,7 @@ async function bootUi() {
       };
       window.FitAddon = { FitAddon: class { fit() {} } };
       window.WebSocket = FakeWebSocket;
+      window.requestAnimationFrame = (callback) => callback();
     },
   });
 
@@ -76,7 +81,7 @@ async function bootUi() {
   await Promise.resolve();
   await Promise.resolve();
 
-  return { dom, sockets, termWrites };
+  return { dom, sockets, termWrites, terminalOptions };
 }
 
 afterEach(() => {
@@ -91,6 +96,23 @@ describe("index.html terminal WebSocket lifecycle", () => {
 
     expect(sockets).toHaveLength(1);
     expect(sockets[0].url).toBe("ws://127.0.0.1:12345/");
+  });
+
+  it("initializes the Web UI iframe even if terminal transport script is missing", async () => {
+    const { dom } = await bootUi({ withTransport: false });
+
+    expect(dom.window.document.getElementById("webui").src).toBe("http://localhost:5080/");
+    expect(dom.window.document.querySelector(".pane.active").id).toBe("webui-pane");
+  });
+
+  it("uses normal terminal font size and full-size terminal container", async () => {
+    const { dom, terminalOptions } = await bootUi();
+
+    dom.window.document.querySelector('[data-pane="cli-pane"]').click();
+
+    expect(terminalOptions[0].fontSize).toBe(14);
+    expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).height).toBe("100%");
+    expect(dom.window.getComputedStyle(dom.window.document.getElementById("term")).width).toBe("100%");
   });
 
   it("does not count intentional retry teardown as another WebSocket failure", async () => {

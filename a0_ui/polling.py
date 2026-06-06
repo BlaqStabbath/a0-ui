@@ -40,20 +40,31 @@ def serve_polling(bridge: BridgeLike, host: str, port: int) -> ThreadingHTTPServ
         def log_message(self, format, *args):
             pass
 
+        def _send_cors_headers(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._send_cors_headers()
+            self.end_headers()
+
         def do_GET(self):
             if self.path.startswith("/pty/output"):
                 qs = parse_qs(urlparse(self.path).query)
                 since = int(qs.get("since", ["0"])[0])
                 seq, data = get_output(bridge_ref, since=since)
-                body = seq.to_bytes(8, "big", signed=False) + data
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("X-Pty-Seq", str(seq))
-                self.send_header("Content-Length", str(len(body)))
+                self._send_cors_headers()
+                self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
-                self.wfile.write(body)
+                self.wfile.write(data)
             else:
                 self.send_response(404)
+                self._send_cors_headers()
                 self.end_headers()
 
         def do_POST(self):
@@ -62,9 +73,11 @@ def serve_polling(bridge: BridgeLike, host: str, port: int) -> ThreadingHTTPServ
                 data = self.rfile.read(length) if length else b""
                 post_input(bridge_ref, data)
                 self.send_response(204)
+                self._send_cors_headers()
                 self.end_headers()
             else:
                 self.send_response(404)
+                self._send_cors_headers()
                 self.end_headers()
 
     server = ThreadingHTTPServer((host, port), Handler)
