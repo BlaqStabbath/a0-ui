@@ -1,5 +1,21 @@
 // @vitest-environment node
 
+/*
+ * DEPRECATED: documentation-only browser harness.
+ *
+ * This file launches Chromium directly and injects a fake `window.pywebview`
+ * API into the wrapper HTML. That bypasses the actual a0-ui desktop wrapper:
+ * no pywebview process, no real JS bridge, no real webview HTTP server, and no
+ * real wrapper lifecycle. It should never have been treated as end-to-end
+ * coverage for wrapper behavior.
+ *
+ * Keep this file only as executable documentation for the old browser-harness
+ * approach and for narrow browser/iframe experiments. Do not add restart,
+ * reconnect, Docker, or wrapper-lifecycle regression tests here. Those must be
+ * tested against the real pywebview wrapper process in
+ * tests/test_pywebview_app_e2e.py with A0_RUN_PYWEBVIEW_E2E=1.
+ */
+
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import http from "node:http";
@@ -129,7 +145,7 @@ function makeHarnessWithWebUiUrl(wsPort, webuiUrl) {
   const terminalStubs = `<script>window.__termWrites=[]; window.Terminal=class{constructor(){this.cols=101;this.rows=33} loadAddon(){} open(){} focus(){} write(data){window.__termWrites.push(String(data))} onData(cb){this._onData=cb}}</script><script>window.FitAddon={FitAddon:class{fit(){}}}</script>`;
   return html
     .replace('<script src="./js/transport.js"></script>', `${terminalStubs}<script>${transport}</script>`)
-    .replace("<script>\nconst createTransport", `<script>\nwindow.pywebview={api:{get_status:async()=>({container:"agent-zero",webui_url:${JSON.stringify(webuiUrl)},entry_cmd:"a0",ws_port:${wsPort},http_port:9}),get_logs:async()=>"",open_webui:async()=>({ok:true}),restart_a0:async()=>({ok:true})}};\nconst createTransport`);
+    .replace("<script>\nconst createTransport", `<script>\nwindow.pywebview={api:{get_status:async()=>({container:"agent-zero",webui_url:${JSON.stringify(webuiUrl)},entry_cmd:"a0",ws_port:${wsPort},http_port:9}),get_logs:async()=>"",open_webui:async()=>({ok:true}),restart_a0:async()=>({ok:true}),check_a0_ready:async()=>({ok:true,running:true,webui_ready:true})}};\nconst createTransport`);
 }
 
 async function launchChromium() {
@@ -225,7 +241,7 @@ function openHarnessPage(browserCdp, endpoint, harnessPath) {
   return openPageAtUrl(browserCdp, endpoint, `file://${harnessPath}`);
 }
 
-describe("Chromium terminal WebSocket E2E", () => {
+describe.skip("DEPRECATED Chromium browser harness, not wrapper e2e", () => {
   it("connects by WebSocket without polling fallback and captures browser diagnostics", async () => {
     const wsServer = await startTerminalWsServer();
     const harnessPath = path.join(os.tmpdir(), `a0-ui-harness-${process.pid}.html`);
@@ -332,4 +348,5 @@ describe("Chromium terminal WebSocket E2E", () => {
       fs.rmSync(browser.userDataDir, { recursive: true, force: true });
     }
   }, 20000);
+
 });

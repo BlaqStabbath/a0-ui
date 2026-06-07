@@ -102,3 +102,62 @@ class PtyBridge:
             except Exception:
                 pass
             self._master_fd = None
+
+
+class RestartablePtyBridge:
+    """Delegating bridge whose underlying PTY process can be replaced."""
+
+    def __init__(self, command: str, max_buffer_bytes: int = 65536) -> None:
+        self.command = command
+        self.max_buffer_bytes = max_buffer_bytes
+        self._bridge: PtyBridge | None = None
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        with self._lock:
+            if self._bridge is not None:
+                return
+            self._bridge = self._new_bridge()
+
+    def _new_bridge(self) -> PtyBridge:
+        bridge = PtyBridge(self.command, max_buffer_bytes=self.max_buffer_bytes)
+        bridge.start()
+        return bridge
+
+    def restart(self) -> None:
+        with self._lock:
+            old = self._bridge
+            self._bridge = self._new_bridge()
+        if old is not None:
+            old.stop()
+
+    def stop(self) -> None:
+        with self._lock:
+            old = self._bridge
+            self._bridge = None
+        if old is not None:
+            old.stop()
+
+    def _current(self) -> PtyBridge:
+        bridge = self._bridge
+        if bridge is None:
+            raise RuntimeError("PtyBridge not started")
+        return bridge
+
+    def write(self, data: bytes) -> None:
+        self._current().write(data)
+
+    def resize(self, cols: int, rows: int) -> None:
+        self._current().resize(cols, rows)
+
+    def read_since(self, seq: int) -> tuple[int, bytes]:
+        return self._current().read_since(seq)
+
+    def subscribe(self, callback: Callable[[bytes], None]) -> None:
+        self._current().subscribe(callback)
+
+    def unsubscribe(self, callback: Callable[[bytes], None]) -> None:
+        try:
+            self._current().unsubscribe(callback)
+        except RuntimeError:
+            pass

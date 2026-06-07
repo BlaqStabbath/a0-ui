@@ -10,10 +10,12 @@ import shutil
 import sys
 import webbrowser
 import webview
+import urllib.request
+from collections import deque
 from webview import settings as webview_settings
 
 from a0_ui.polling import serve_polling
-from a0_ui.pty_bridge import PtyBridge
+from a0_ui.pty_bridge import RestartablePtyBridge
 from a0_ui.runtime.config import load_config
 from a0_ui.shell_session import serve_shell_session
 from a0_ui.terminal.command_builder import build_shell_command
@@ -23,6 +25,23 @@ WINDOW_W, WINDOW_H = 1200, 800
 _ws_port = [0]
 _http_port = [0]
 _wrapper_port = [0]
+_terminal_bridge: list[RestartablePtyBridge | None] = [None]
+_wrapper_events = deque(maxlen=300)
+_wrapper_events_lock = threading.Lock()
+
+
+def _record_event(message: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _wrapper_events_lock:
+        _wrapper_events.append(f"[{timestamp}] {message}")
+
+
+def _format_wrapper_events() -> str:
+    with _wrapper_events_lock:
+        events = list(_wrapper_events)
+    if not events:
+        return "=== wrapper events ===\n(no wrapper events recorded)\n"
+    return "=== wrapper events ===\n" + "\n".join(events) + "\n"
 
 
 def get_status() -> dict:
@@ -39,9 +58,9 @@ def get_status() -> dict:
 
 
 def get_logs() -> str:
-    out = ""
+    out = _format_wrapper_events()
     if not shutil.which("docker"):
-        return "docker not found on PATH"
+        return out + "\n=== docker logs ===\ndocker not found on PATH\n"
     container = load_config().container
     try:
         r = subprocess.run(
@@ -73,22 +92,89 @@ def get_logs() -> str:
 
 def restart_a0() -> dict:
     if not shutil.which("docker"):
+        _record_event("docker restart requested but docker was not found on PATH")
         return {"ok": False, "error": "docker not found on PATH"}
     container = load_config().container
+    _record_event(f"docker restart requested for container {container}")
 
     def run():
-        subprocess.run(
-            ["docker", "restart", container],
-            capture_output=True, text=True, timeout=60,
-        )
+        try:
+            r = subprocess.run(
+                ["docker", "restart", container],
+                capture_output=True, text=True, timeout=60,
+            )
+            if r.returncode == 0:
+                _record_event(f"docker restart completed for container {container}")
+            else:
+                error = (r.stderr or r.stdout or f"exit {r.returncode}").strip()
+                _record_event(f"docker restart failed for container {container}: {error}")
+        except Exception as e:
+            _record_event(f"docker restart raised for container {container}: {e}")
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True}
 
 
+def restart_cli() -> dict:
+    bridge = _terminal_bridge[0]
+    if bridge is None:
+        _record_event("A0 CLI restart requested but terminal bridge is not started")
+        return {"ok": False, "error": "terminal bridge not started"}
+    try:
+        _record_event("A0 CLI restart requested")
+        bridge.restart()
+    except Exception as e:
+        _record_event(f"A0 CLI restart failed: {e}")
+        return {"ok": False, "error": str(e)}
+    _record_event("A0 CLI restart completed")
+    return {"ok": True}
+
+
+def check_a0_ready() -> dict:
+    """Return readiness from the wrapper backend, not browser fetch/CORS."""
+    if not shutil.which("docker"):
+        _record_event("readiness check failed: docker not found on PATH")
+        return {"ok": False, "running": False, "webui_ready": False, "error": "docker not found on PATH"}
+    config = load_config()
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", config.container],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception as e:
+        _record_event(f"readiness check failed while inspecting container {config.container}: {e}")
+        return {"ok": False, "running": False, "webui_ready": False, "error": str(e)}
+
+    running = r.returncode == 0 and (r.stdout or "").strip().lower() == "true"
+    if not running:
+        _record_event(f"readiness check: container {config.container} is not running")
+        return {
+            "ok": False,
+            "running": False,
+            "webui_ready": False,
+            "error": (r.stderr or r.stdout or "container is not running").strip(),
+        }
+
+    try:
+        req = urllib.request.Request(config.webui_url, method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            webui_ready = resp.status < 500
+    except Exception as e:
+        _record_event(f"readiness check: container {config.container} running, Web UI not ready: {e}")
+        return {"ok": False, "running": True, "webui_ready": False, "error": str(e)}
+
+    if webui_ready:
+        _record_event(f"readiness check passed for container {config.container} and Web UI {config.webui_url}")
+    else:
+        _record_event(f"readiness check: Web UI {config.webui_url} returned server error")
+    return {"ok": webui_ready, "running": True, "webui_ready": webui_ready}
+
+
 def open_webui() -> dict:
     url = load_config().webui_url
-    return {"ok": webbrowser.open(url)}
+    ok = webbrowser.open(url)
+    _record_event(f"open browser requested for Web UI {url}: {'ok' if ok else 'failed'}")
+    return {"ok": ok}
 
 
 def _webview_storage_path() -> str:
@@ -104,16 +190,19 @@ def _free_port() -> int:
     return p
 
 
-def _start_servers() -> PtyBridge:
+def _start_servers() -> RestartablePtyBridge:
     config = load_config()
     command = build_shell_command(config.entry_cmd)
-    bridge = PtyBridge(command)
+    _record_event(f"starting A0 CLI bridge with command: {config.entry_cmd}")
+    bridge = RestartablePtyBridge(command)
     bridge.start()
+    _terminal_bridge[0] = bridge
 
     ws_port = _free_port()
     http_port = _free_port()
     _ws_port[0] = ws_port
     _http_port[0] = http_port
+    _record_event(f"terminal servers allocated: ws_port={ws_port}, http_port={http_port}")
 
     def run_ws():
         asyncio.run(serve_shell_session(bridge, "127.0.0.1", ws_port))
@@ -123,6 +212,7 @@ def _start_servers() -> PtyBridge:
 
     threading.Thread(target=run_ws, daemon=True).start()
     threading.Thread(target=run_http, daemon=True).start()
+    _record_event("terminal WebSocket and polling servers started")
     time.sleep(0.3)
     return bridge
 
@@ -136,6 +226,12 @@ class Api:
 
     def restart_a0(self):
         return restart_a0()
+
+    def restart_cli(self):
+        return restart_cli()
+
+    def check_a0_ready(self):
+        return check_a0_ready()
 
     def open_webui(self):
         return open_webui()
@@ -151,6 +247,7 @@ def main() -> None:
     args = _parse_args()
     config = load_config()
     debug_enabled = args.debug or config.debug
+    _record_event("a0-ui wrapper starting")
     webview_settings["ALLOW_FILE_URLS"] = True
 
     if debug_enabled:
@@ -182,6 +279,7 @@ def main() -> None:
 
     storage_path = _webview_storage_path()
     os.makedirs(storage_path, exist_ok=True)
+    _record_event(f"pywebview starting with wrapper_port={wrapper_port}, storage_path={storage_path}")
     webview.start(
         private_mode=False,
         storage_path=storage_path,

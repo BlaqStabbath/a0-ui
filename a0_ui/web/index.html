@@ -46,6 +46,8 @@
   #status-dot.disconnected{background:#ef4444}
   #status-dot.retrying{background:#f59e0b}
   #status-dot.polling{background:#facc15}
+  #toast{position:fixed;right:18px;bottom:18px;z-index:20;max-width:420px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:rgba(21,17,42,.96);color:var(--text);box-shadow:0 18px 40px rgba(0,0,0,.3);opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}
+  #toast.visible{opacity:1;transform:translateY(0)}
 </style>
 </head>
 <body>
@@ -69,10 +71,12 @@
   <div id="logs-pane" class="pane"><pre id="logs">loading...</pre></div>
   <div id="cli-pane" class="pane"><div id="term"></div></div>
 </div>
+<div id="toast" role="status" aria-live="polite"></div>
 <script src="./js/transport.js"></script>
 <script>
 const createTransport = window.a0Transport && window.a0Transport.createTransport;
 const POLLING_INTERVAL_MS = 200;
+const LOGS_REFRESH_MS = 2000;
 const REQUIRE_WEBSOCKET = true;
 const XTERM_CSS_URL = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css';
 const XTERM_JS_URL = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
@@ -85,12 +89,14 @@ let closingWsForReconnect = false;
 let terminalResizeObserver = null;
 let initialized = false;
 let terminalAssetsPromise = null;
+let toastTimer = null;
+let logsTimer = null;
 
 async function init(){
   if (initialized) return;
   initialized = true;
   status = await window.pywebview.api.get_status();
-  document.getElementById('status').textContent = 'Container: ' + status.container + ' | WebUI: ' + status.webui_url + ' | Shell: ' + status.entry_cmd;
+  renderStatus();
   document.getElementById('webui').src = status.webui_url;
   bindTabs(); bindButtons();
   setActiveTab('webui-pane');
@@ -105,7 +111,8 @@ function setActiveTab(pane){
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === pane));
   if (pane === 'cli-pane' && !term) startTerm();
   if (pane === 'cli-pane' && term) fitTerminal();
-  if (pane === 'logs-pane') loadLogs();
+  if (pane === 'logs-pane') startLiveLogs();
+  else stopLiveLogs();
 }
 
 function bindButtons(){
@@ -178,9 +185,21 @@ async function openWebUi(){
 
 async function loadLogs(){
   const el = document.getElementById('logs');
-  el.textContent = 'loading...';
+  if (!el.textContent || el.textContent === 'loading...') el.textContent = 'loading...';
   try { el.textContent = await window.pywebview.api.get_logs(); }
   catch (e) { el.textContent = 'Error: ' + e; }
+}
+
+function startLiveLogs(){
+  loadLogs();
+  if (logsTimer) return;
+  logsTimer = setInterval(loadLogs, LOGS_REFRESH_MS);
+}
+
+function stopLiveLogs(){
+  if (!logsTimer) return;
+  clearInterval(logsTimer);
+  logsTimer = null;
 }
 
 async function restartA0(){
@@ -189,25 +208,46 @@ async function restartA0(){
   try {
     const r = await window.pywebview.api.restart_a0();
     if (!r.ok){ alert('Restart failed: ' + (r.error || 'unknown')); return; }
-    setStatus('Waiting for container...');
+    showToast('Waiting for container...');
     for (let i = 0; i < 60; i++){
       await new Promise(r => setTimeout(r, 2000));
       try {
-        const r2 = await fetch(status.webui_url, { method: 'GET', cache: 'no-store' });
-        if (r2.ok || r2.status < 500){
-          setStatus('Container is up. Reloading Web UI.');
+        const r2 = await window.pywebview.api.check_a0_ready();
+        if (r2.ok && r2.running && r2.webui_ready){
+          showToast('Container is up. Reloading Web UI.');
+          renderStatus();
           document.getElementById('webui').src = status.webui_url;
           setActiveTab('webui-pane');
+          if (term) {
+            const cli = await window.pywebview.api.restart_cli();
+            if (!cli.ok) showToast('A0 CLI restart failed: ' + (cli.error || 'unknown'));
+            reconnectTerminal();
+          }
           return;
         }
       } catch (e) {}
-      setStatus('Still waiting... (' + (i + 1) + '/60)');
+      showToast('Still waiting... (' + (i + 1) + '/60)');
     }
-    setStatus('Container did not come back in time. Check Logs tab.');
+    showToast('Container did not come back in time. Check Logs tab.');
   } finally { btn.disabled = false; btn.textContent = old; }
 }
 
 function setStatus(s){ document.getElementById('status').textContent = s; }
+
+function renderStatus(){
+  setStatus('Container: ' + status.container + ' | WebUI: ' + status.webui_url + ' | Shell: ' + status.entry_cmd);
+}
+
+function showToast(message){
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.classList.add('visible');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('visible');
+    toastTimer = null;
+  }, 5000);
+}
 
 function updateStatusDot(){
   const dot = document.getElementById('status-dot');
@@ -306,6 +346,38 @@ async function pollTick() {
 function manualReconnect() {
   stopPolling();
   startTerm();
+}
+
+function reconnectTerminal() {
+  resetTerminalSession();
+  startTerm();
+}
+
+function resetTerminalSession() {
+  if (ws) {
+    try {
+      closingWsForReconnect = true;
+      ws.close();
+    } catch (e) {
+    } finally {
+      closingWsForReconnect = false;
+      ws = null;
+    }
+  }
+  if (pollState.active) stopPolling();
+  if (terminalResizeObserver) {
+    try { terminalResizeObserver.disconnect(); } catch (e) {}
+    terminalResizeObserver = null;
+  }
+  window.removeEventListener('resize', fitTerminal);
+  if (window.visualViewport) window.visualViewport.removeEventListener('resize', fitTerminal);
+  if (term && typeof term.dispose === 'function') {
+    try { term.dispose(); } catch (e) {}
+  }
+  document.getElementById('term').textContent = '';
+  term = null;
+  fit = null;
+  transport = createTransport ? createTransport() : null;
 }
 
 async function startTerm(){

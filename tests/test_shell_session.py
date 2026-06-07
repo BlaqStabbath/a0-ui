@@ -132,3 +132,38 @@ def test_app_start_servers_publishes_browser_origin_websocket():
         bridge.stop()
 
     assert "app-websocket-ready" in output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only test (uses bash)")
+def test_app_restart_cli_replaces_pty_for_new_websocket_clients(tmp_path):
+    marker = tmp_path / "cli-start-count"
+    script = tmp_path / "cli-start.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"count=$(($(cat {marker} 2>/dev/null || echo 0)+1))\n"
+        f"echo $count > {marker}\n"
+        "echo cli-start-$count\n"
+        "exec bash\n"
+    )
+    script.chmod(0o755)
+    cmd = f"sh {script}"
+    with mock.patch.dict("os.environ", {"A0_CLI_CMD": cmd}, clear=True):
+        bridge = app._start_servers()
+
+    async def read_first_message():
+        async with websockets.connect(
+            f"ws://127.0.0.1:{app._ws_port[0]}/",
+            origin="null",
+        ) as ws:
+            return await asyncio.wait_for(ws.recv(), timeout=5.0)
+
+    try:
+        first = asyncio.run(read_first_message())
+        assert app.restart_cli() == {"ok": True}
+        time.sleep(0.3)
+        second = asyncio.run(read_first_message())
+    finally:
+        bridge.stop()
+
+    assert "cli-start-1" in first
+    assert "cli-start-2" in second
